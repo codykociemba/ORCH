@@ -18,6 +18,7 @@ import {
   gitlabProjectPath,
   gitlabWikiApiBase,
   isDefaultBranch,
+  parseRemote,
   planWikiSync,
   withGitHubToken,
   type WikiHost,
@@ -89,14 +90,15 @@ export class WikiService {
     const defaultBranch = await this.detectDefaultBranch();
     const workflow = await new WorkflowConfigStore(this.projectRoot).read();
     const explicit = workflow?.wiki?.provider;
+    const originHost = parseRemote(origin).host;
     const detection = detectWikiProvider({
       origin,
       remotes,
       configured: explicit === 'github' || explicit === 'gitlab'
         ? explicit
         : inferConfiguredHost(origin, remotes, workflow),
-      githubServerUrl: process.env['GITHUB_SERVER_URL'],
-      gitlabProjectUrl: process.env['CI_PROJECT_URL'],
+      githubServerUrl: originHost === 'gitlab' ? undefined : process.env['GITHUB_SERVER_URL'],
+      gitlabProjectUrl: originHost === 'github' ? undefined : process.env['CI_PROJECT_URL'],
     });
     const pages = await this.listGeneratedPages();
     const index_current = await this.indexCurrent();

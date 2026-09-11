@@ -43,6 +43,25 @@ describe('WikiService', () => {
     expect(status.origin).toContain('gitlab.com/acme/orch');
   });
 
+  it('does not let GITHUB_SERVER_URL override a GitLab publish remote', async () => {
+    const previous = process.env['GITHUB_SERVER_URL'];
+    process.env['GITHUB_SERVER_URL'] = 'https://github.com';
+    try {
+      const service = new WikiService('/repo', async (_command, args) => {
+        if (args.includes('--get') || args.includes('remote')) return { stdout: 'https://gitlab.com/acme/orch.git\n', stderr: '' };
+        if (args.includes('--abbrev-ref')) return { stdout: 'main\n', stderr: '' };
+        if (args.includes('symbolic-ref')) return { stdout: 'refs/remotes/origin/main\n', stderr: '' };
+        if (args.includes('rev-parse')) return { stdout: 'abc\n', stderr: '' };
+        return { stdout: '', stderr: '' };
+      });
+      const status = await service.status({ probeRemote: false });
+      expect(status.host).toBe('gitlab');
+    } finally {
+      if (previous === undefined) delete process.env['GITHUB_SERVER_URL'];
+      else process.env['GITHUB_SERVER_URL'] = previous;
+    }
+  });
+
   it('points at the GitHub wiki _new form when bootstrap is required', async () => {
     const service = new WikiService('/repo', async (_command, args) => {
       if (args.includes('--abbrev-ref')) return { stdout: 'main\n', stderr: '' };
