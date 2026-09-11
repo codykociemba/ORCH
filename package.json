@@ -14,7 +14,12 @@
   "files": [
     "dist",
     "scripts",
-    "skills"
+    "skills",
+    ".github/workflows/wiki-preview.yml",
+    ".github/workflows/wiki-publish.yml",
+    ".github/workflows/cursor-review.yml",
+    ".github/cursor-review-prompt.md",
+    ".gitlab-ci-wiki.yml"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

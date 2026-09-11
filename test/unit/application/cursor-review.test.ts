@@ -171,6 +171,29 @@ describe('copyWorkflowCiTemplates', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('copies wiki and cursor CI templates from the package root', async () => {
+    const root = path.join(tmpdir(), `orch-setup-ci-${Date.now()}`);
+    await mkdir(path.join(root, '.orch'), { recursive: true });
+    const pathExists = async (file: string): Promise<boolean> => {
+      try {
+        await access(file);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      await copyWorkflowCiTemplates(root, pathExists);
+      await access(path.join(root, '.github', 'workflows', 'wiki-preview.yml'));
+      await access(path.join(root, '.github', 'workflows', 'wiki-publish.yml'));
+      await access(path.join(root, '.github', 'workflows', 'cursor-review.yml'));
+      await access(path.join(root, '.github', 'cursor-review-prompt.md'));
+      await access(path.join(root, 'scripts', 'cursor-pr-review.mjs'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ReviewStore duplicate webhook delivery', () => {

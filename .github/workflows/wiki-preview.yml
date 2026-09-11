@@ -43,8 +43,13 @@ jobs:
             echo "Local CLIs are not available on this runner."
             exit 0
           fi
-          npm ci
-          npx tsx src/bin/cli.ts wiki generate
+          if [ -f src/bin/cli.ts ]; then
+            npm ci
+            npx tsx src/bin/cli.ts wiki generate
+          else
+            npm install -g git+https://github.com/codykociemba/ORCH.git
+            orch wiki generate
+          fi
 
       - name: Upload preview artifact
         if: always()

@@ -155,11 +155,20 @@ export async function copyWorkflowCiTemplates(
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { copyFile, mkdir } = await import('node:fs/promises');
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  const marker = '.github/workflows/wiki-preview.yml';
+  let repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (await pathExists(path.join(repoRoot, marker))) break;
+    const parent = path.dirname(repoRoot);
+    if (parent === repoRoot) break;
+    repoRoot = parent;
+  }
   const templates = [
     ['.github/workflows/wiki-preview.yml', 'wiki preview CI'],
     ['.github/workflows/wiki-publish.yml', 'wiki publish CI'],
     ['.github/workflows/cursor-review.yml', 'Cursor review Action'],
+    ['.github/cursor-review-prompt.md', 'Cursor review prompt'],
+    ['scripts/cursor-pr-review.mjs', 'Cursor review publisher'],
     ['.gitlab-ci-wiki.yml', 'GitLab wiki CI'],
   ] as const;
   let copied = 0;

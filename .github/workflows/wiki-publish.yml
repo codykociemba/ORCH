@@ -37,8 +37,13 @@ jobs:
             echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY."
             exit 0
           fi
-          npm ci
-          npx tsx src/bin/cli.ts wiki generate
+          if [ -f src/bin/cli.ts ]; then
+            npm ci
+            npx tsx src/bin/cli.ts wiki generate
+          else
+            npm install -g git+https://github.com/codykociemba/ORCH.git
+            orch wiki generate
+          fi
 
       - name: Publish to provider wiki
         env:
@@ -51,6 +56,10 @@ jobs:
           fi
           echo "Trusted default-branch context: ${GITHUB_REF_NAME}"
           git checkout -B "${GITHUB_REF_NAME}"
-          npx tsx src/bin/cli.ts wiki publish
+          if [ -f src/bin/cli.ts ]; then
+            npx tsx src/bin/cli.ts wiki publish
+          else
+            orch wiki publish
+          fi
           echo "Do not use --force. PR previews belong in wiki-preview.yml."
           echo "BOOTSTRAP_REQUIRED exits 1 — create the first GitHub wiki page, then rerun."
