@@ -80,10 +80,16 @@ export function isDefaultBranch(current: string, defaultBranch: string): boolean
   return current.replace(/^refs\/heads\//, '') === defaultBranch.replace(/^refs\/heads\//, '');
 }
 
-export const ORCH_WIKI_MARKER = '<!-- orch-wiki:generated';
+export const ORCH_WIKI_MARKER = '<!-- orch:gitnexus-generated -->';
+const ORCH_WIKI_MARKER_LEGACY = '<!-- orch-wiki:generated';
 
 export function githubWikiRemote(owner: string, repo: string): string {
   return `https://github.com/${owner}/${repo}.wiki.git`;
+}
+
+/** First GitHub wiki page must be created in the UI; this is that form. */
+export function githubWikiBootstrapUrl(owner: string, repo: string): string {
+  return `https://github.com/${owner}/${repo}/wiki/_new`;
 }
 
 /** CI may set a token; locally prefer `gh auth token` so users do not paste GITHUB_TOKEN. */
@@ -96,8 +102,25 @@ export function withGitHubToken(remote: string, token: string): string {
   return remote.replace('https://', `https://x-access-token:${token}@`);
 }
 
-export function gitlabWikiApiBase(): string {
-  return (process.env['CI_API_V4_URL'] ?? process.env['GITLAB_API_URL'] ?? 'https://gitlab.com/api/v4').replace(/\/+$/, '');
+/** CI vars override hostname guessing. Then optional workflow URL, then origin host, then gitlab.com. */
+export function gitlabWikiApiBase(origin?: string, configuredApiUrl?: string): string {
+  const fromEnv = (process.env['CI_API_V4_URL'] ?? process.env['GITLAB_API_URL'] ?? '').replace(/\/+$/, '');
+  if (fromEnv) return fromEnv;
+  const configured = configuredApiUrl?.replace(/\/+$/, '');
+  if (configured) return configured;
+  const host = gitHttpsHost(origin);
+  if (host && host.toLowerCase() !== 'gitlab.com') {
+    return `https://${host}/api/v4`;
+  }
+  return 'https://gitlab.com/api/v4';
+}
+
+function gitHttpsHost(origin?: string): string | undefined {
+  if (!origin) return undefined;
+  const https = /https?:\/\/([^/@]+)/i.exec(origin);
+  if (https?.[1]) return https[1];
+  const ssh = /@([^:]+):/.exec(origin);
+  return ssh?.[1];
 }
 
 export function gitlabProjectPath(owner: string, repo: string): string {
@@ -105,12 +128,22 @@ export function gitlabProjectPath(owner: string, repo: string): string {
 }
 
 export function isOrchWikiPage(content: string): boolean {
-  return content.includes(ORCH_WIKI_MARKER);
+  return content.includes(ORCH_WIKI_MARKER) || content.includes(ORCH_WIKI_MARKER_LEGACY);
 }
 
 export function wrapWikiPage(body: string, sha: string): string {
-  const stripped = body.replace(/^<!-- orch-wiki:generated[^>]*-->\s*/m, '');
-  return `${ORCH_WIKI_MARKER} sha=${sha} -->\n${stripped}`;
+  const stripped = body
+    .replace(/^<!-- orch:gitnexus-generated -->\s*/m, '')
+    .replace(/^<!-- source-sha: [^>]*-->\s*/m, '')
+    .replace(/^<!-- generated-at: [^>]*-->\s*/m, '')
+    .replace(/^<!-- orch-wiki:generated[^>]*-->\s*/m, '');
+  return [
+    ORCH_WIKI_MARKER,
+    `<!-- source-sha: ${sha} -->`,
+    `<!-- generated-at: ${new Date().toISOString()} -->`,
+    '',
+    stripped,
+  ].join('\n');
 }
 
 /** GitNexus writes overview.md; GitHub wiki home page is Home.md. */
@@ -119,6 +152,13 @@ export function generatedWikiPageName(file: string): string | null {
   if (!base.endsWith('.md')) return null;
   if (base === 'overview.md') return 'Home.md';
   return base;
+}
+
+const LOCAL_ONLY_WIKI = /orch-compound-linear-cou|orch-gitnexus-code-admis|ORCH_COMPOUND_LINEAR_COUNCIL_IMPLEMENTATION_SPEC|ORCH_GITNEXUS_CODE_ADMISSION_ADDENDUM/i;
+
+/** Local-only design specs must never ship to the public provider wiki. */
+export function isLocalOnlyWikiPage(name: string, body = ''): boolean {
+  return LOCAL_ONLY_WIKI.test(name) || LOCAL_ONLY_WIKI.test(body.slice(0, 800));
 }
 
 export interface WikiSyncPlan {
@@ -131,10 +171,12 @@ export function planWikiSync(input: {
   generated: Array<{ name: string; body: string }>;
   remote: Array<{ name: string; body: string }>;
   sha: string;
+  ownership?: 'generated_pages' | 'full';
 }): WikiSyncPlan {
   const write: WikiSyncPlan['write'] = [];
   const generatedNames = new Set<string>();
   for (const page of input.generated) {
+    if (isLocalOnlyWikiPage(page.name, page.body)) continue;
     const name = generatedWikiPageName(page.name);
     if (!name) continue;
     generatedNames.add(name);
@@ -145,7 +187,7 @@ export function planWikiSync(input: {
   const remove: string[] = [];
   for (const page of input.remote) {
     if (generatedNames.has(page.name)) continue;
-    if (isOrchWikiPage(page.body)) remove.push(page.name);
+    if (isOrchWikiPage(page.body) || input.ownership === 'full') remove.push(page.name);
     else preserved.push(page.name);
   }
   return { write, remove, preserved };

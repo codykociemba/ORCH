@@ -32,6 +32,16 @@
 
 <!-- Task: `tsk_…`  Plan: `plan_…`  Plan unit: `U-…`  Council: `cnc_…` -->
 
+## Verification
+
+- [ ] Tests
+- [ ] Typecheck
+- [ ] Lint
+- [ ] Task-specific acceptance checks
+- [ ] Required review completed
+
+<!-- orch-proof:tsk_…:HEADSHA -->
+
 ## Related issues
 
 <!-- Link related issues: Fixes #123, Closes #456 -->

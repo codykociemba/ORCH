@@ -47,6 +47,7 @@ There are two types of skills:
 | Shipping | ship, land-and-deploy, canary, document-release |
 | Infrastructure | browse, benchmark, setup-deploy, setup-browser-cookies |
 | Safety | careful, freeze, unfreeze, guard |
+| Team workflow | workflow, code-admission, council, linear-sync, proof, ponytail |
 | Cross-AI | codex |
 | Meta | upgrade, retro |
 
@@ -82,10 +83,11 @@ export function getDefaultAgents(adapter: string = 'claude'): Agent[] {
   if (adapter === 'shell') return [];
 
   const model = resolveModel(adapter, 'balanced');
+  const teamSkills = ['workflow', 'code-admission'];
   // MCP skills (colon-format) only work with Claude CLI
   const skills: string[] = adapter === 'claude'
-    ? ['document-skills:skill-creator']
-    : [];
+    ? [...teamSkills, 'document-skills:skill-creator']
+    : [...teamSkills];
 
   return [
     {

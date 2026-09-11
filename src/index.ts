@@ -34,7 +34,15 @@ export { WikiService } from './application/wiki-service.js';
 export { ReuseAnalysisService } from './application/reuse-analysis-service.js';
 export { resolvePonytailMode, renderPonytailPrompt } from './application/ponytail-policy.js';
 export { buildPlanManifest, describeRoute } from './application/plan-router.js';
+export { planAllowsReuseCreates } from './domain/plan.js';
 export { CouncilService, DEFAULT_COUNCIL_MEMBERS } from './application/council-service.js';
+export {
+  COUNCIL_OVERRIDE_LABEL,
+  councilVerdictAllowsDispatch,
+  renderCouncilMarkdown,
+  strongestCouncilObjections,
+} from './domain/council.js';
+export type { CouncilResult, CouncilVerdict } from './domain/council.js';
 export { verifySmallPlanReuse } from './application/plan-reuse-verifier.js';
 export { passesDispatchGates } from './application/dispatch-policy.js';
 export { parseCursorReview } from './application/cursor-review.js';

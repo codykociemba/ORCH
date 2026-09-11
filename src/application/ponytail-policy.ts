@@ -54,5 +54,6 @@ export function renderPonytailPrompt(decision: PonytailDecision): string {
     `Mode: ${decision.mode} (${decision.reason})`,
     intensity,
     'Does it already exist? Use it. Use stdlib/platform. Avoid speculative abstractions. Fewest files.',
+    'ORCH/CE acceptance criteria and the Modification Contract always override Ponytail minimalism.',
   ].join('\n');
 }

@@ -27,7 +27,10 @@ jobs:
       - name: Index repository
         env:
           GITNEXUS_LBUG_BUFFER_POOL_SIZE: '2147483648'
-        run: gitnexus analyze --index-only
+        run: |
+          gitnexus analyze --index-only
+          gitnexus status --json > /tmp/gitnexus-status.json
+          node -e 'const fs=require("fs"); const s=JSON.parse(fs.readFileSync("/tmp/gitnexus-status.json","utf8")); fs.writeFileSync("/tmp/gitnexus-fresh.txt", String(s.status||"unknown"));'
 
       - name: Generate wiki preview
         env:
@@ -40,7 +43,8 @@ jobs:
             echo "Local CLIs are not available on this runner."
             exit 0
           fi
-          gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+          npm ci
+          npx tsx src/bin/cli.ts wiki generate
 
       - name: Upload preview artifact
         if: always()
@@ -49,3 +53,46 @@ jobs:
           name: gitnexus-wiki-preview
           path: .gitnexus/wiki
           if-no-files-found: ignore
+
+      - name: Comment wiki preview status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          PAGES=0
+          if [ -d .gitnexus/wiki ]; then
+            PAGES=$(find .gitnexus/wiki -name '*.md' | wc -l | tr -d ' ')
+          fi
+          INDEX_STATUS=$(cat /tmp/gitnexus-fresh.txt 2>/dev/null || echo unknown)
+          if [ -z "${{ secrets.GITNEXUS_WIKI_API_KEY }}" ]; then
+            STATUS="SKIPPED"
+          elif [ "$INDEX_STATUS" != "current" ]; then
+            STATUS="FAIL"
+          elif [ "$PAGES" -gt 0 ]; then
+            STATUS="PASS"
+          else
+            STATUS="FAIL"
+          fi
+          BODY=$(cat <<EOF
+          <!-- orch-wiki-preview -->
+          Wiki Preview
+          ────────────────────────────
+          GitNexus index: ${INDEX_STATUS}
+          Source SHA: ${HEAD_SHA:0:7}
+          Pages generated/updated: $PAGES
+          Status: $STATUS
+          Artifact: gitnexus-wiki-preview
+          EOF
+          )
+          COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" --jq '.[] | select(.body | contains("orch-wiki-preview")) | .id' | head -n 1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" -f body="$BODY"
+          else
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+          fi
+          if [ "$STATUS" = "FAIL" ]; then
+            echo "Wiki preview required check failed (trusted PR generated 0 pages)."
+            exit 1
+          fi

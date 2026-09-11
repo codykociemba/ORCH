@@ -41,6 +41,7 @@ describe('task cancel', () => {
     // Should use orchestrator.cancelTask via full container
     expect(mockBuildFullContainer).toHaveBeenCalledWith(container.context);
     expect(mockCancelTask).toHaveBeenCalledWith('tsk_1');
+    expect(container.codeAdmissionService.releaseTask).toHaveBeenCalledWith('tsk_1');
   });
 
   it('uses taskService.cancel for non-running tasks', async () => {
@@ -60,6 +61,7 @@ describe('task cancel', () => {
 
     // Should use taskService.cancel for non-running tasks
     expect(cancelMock).toHaveBeenCalledWith('tsk_1');
+    expect(container.codeAdmissionService.releaseTask).toHaveBeenCalledWith('tsk_1');
     // Should NOT build full container
     expect(mockBuildFullContainer).not.toHaveBeenCalled();
   });
@@ -80,6 +82,45 @@ describe('task cancel', () => {
     await program.parseAsync(['node', 'orch', 'task', 'cancel', 'tsk_2']);
 
     expect(cancelMock).toHaveBeenCalledWith('tsk_2');
+    expect(container.codeAdmissionService.releaseTask).toHaveBeenCalledWith('tsk_2');
     expect(mockBuildFullContainer).not.toHaveBeenCalled();
+  });
+});
+
+describe('task approve / reject reviews', () => {
+  it('records a human approve bound to HEAD before marking done', async () => {
+    const { Command } = await import('commander');
+    const { registerTaskCommand } = await import('../../../src/cli/commands/task.js');
+    const program = new Command();
+    const updateStatus = vi.fn(async () => ({ id: 'tsk_1', status: 'done' }));
+    const recordReview = vi.fn(async () => {});
+    const container = makeContainer({
+      taskService: {
+        get: vi.fn(async () => ({
+          id: 'tsk_1',
+          title: 'Ready',
+          status: 'review',
+          proof: { head_sha: 'abc123', files_changed: [] },
+        })),
+        updateStatus,
+        list: vi.fn(async () => []),
+      } as any,
+      integrationService: {
+        enabled: () => false,
+        recordReview,
+      } as any,
+    });
+    registerTaskCommand(program, container);
+    await program.parseAsync(['node', 'orch', 'task', 'approve', 'tsk_1']);
+    expect(recordReview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'tsk_1' }),
+      expect.objectContaining({
+        reviewer_type: 'human',
+        verdict: 'approve',
+        commit_sha: 'abc123',
+      }),
+    );
+    expect(updateStatus).toHaveBeenCalledWith('tsk_1', 'done');
+    expect(container.codeAdmissionService.releaseTask).toHaveBeenCalledWith('tsk_1');
   });
 });

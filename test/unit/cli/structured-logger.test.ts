@@ -208,6 +208,108 @@ describe('StructuredLogger', () => {
       expect((lines[0]!['data'] as string).length).toBe(200);
       unsub();
     });
+
+    it('logs audited council human overrides', () => {
+      const { logger, chunks } = createTestLogger();
+      const unsub = logger.subscribe(eventBus);
+
+      eventBus.emit({
+        type: 'planning:council_overridden',
+        planId: 'plan_1',
+        reason: 'member CLI outage',
+        taskCount: 2,
+      });
+
+      const lines = parseLines(chunks);
+      expect(lines[0]).toMatchObject({
+        level: 'warn',
+        event: 'planning:council_overridden',
+        planId: 'plan_1',
+        reason: 'member CLI outage',
+        taskCount: 2,
+      });
+      unsub();
+    });
+
+    it('logs admission contract and audit start events', () => {
+      const { logger, chunks } = createTestLogger();
+      const unsub = logger.subscribe(eventBus);
+
+      eventBus.emit({ type: 'code_admission:contract_created', taskId: 'tsk_1' });
+      eventBus.emit({ type: 'code_admission:audit_started', taskId: 'tsk_1' });
+
+      const lines = parseLines(chunks);
+      expect(lines[0]).toMatchObject({
+        level: 'info',
+        event: 'code_admission:contract_created',
+        taskId: 'tsk_1',
+      });
+      expect(lines[1]).toMatchObject({
+        level: 'info',
+        event: 'code_admission:audit_started',
+        taskId: 'tsk_1',
+      });
+      unsub();
+    });
+
+    it('logs deleted symbols and processes on admission audit completion', () => {
+      const { logger, chunks } = createTestLogger();
+      const unsub = logger.subscribe(eventBus);
+
+      eventBus.emit({
+        type: 'code_admission:audit_completed',
+        taskId: 'tsk_1',
+        passed: true,
+        violations: [],
+        deleted_symbols: ['oldHelper'],
+        processes: ['RetryFlow'],
+      });
+
+      const lines = parseLines(chunks);
+      expect(lines[0]).toMatchObject({
+        level: 'info',
+        event: 'code_admission:audit_completed',
+        taskId: 'tsk_1',
+        passed: true,
+        deleted_symbols: ['oldHelper'],
+        processes: ['RetryFlow'],
+      });
+      unsub();
+    });
+
+    it('logs GitNexus index freshness events', () => {
+      const { logger, chunks } = createTestLogger();
+      const unsub = logger.subscribe(eventBus);
+
+      eventBus.emit({ type: 'code_intelligence:index_stale', repo: 'ORCH' });
+      eventBus.emit({ type: 'code_intelligence:index_refreshed', repo: 'ORCH' });
+
+      const lines = parseLines(chunks);
+      expect(lines[0]).toMatchObject({ level: 'warn', event: 'code_intelligence:index_stale', repo: 'ORCH' });
+      expect(lines[1]).toMatchObject({ level: 'info', event: 'code_intelligence:index_refreshed', repo: 'ORCH' });
+      unsub();
+    });
+
+    it('logs workspace conventions gate events', () => {
+      const { logger, chunks } = createTestLogger();
+      const unsub = logger.subscribe(eventBus);
+
+      eventBus.emit({ type: 'workspace:conventions_passed', taskId: 'tsk_1' });
+      eventBus.emit({
+        type: 'workspace:conventions_failed',
+        taskId: 'tsk_1',
+        violations: ['conventions: src/utils/dates.ts'],
+      });
+
+      const lines = parseLines(chunks);
+      expect(lines[0]).toMatchObject({ level: 'info', event: 'workspace:conventions_passed', taskId: 'tsk_1' });
+      expect(lines[1]).toMatchObject({
+        level: 'warn',
+        event: 'workspace:conventions_failed',
+        taskId: 'tsk_1',
+      });
+      unsub();
+    });
   });
 
   describe('idle tick throttling', () => {

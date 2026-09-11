@@ -71,6 +71,18 @@ describe('Paths', () => {
       path.join(root, '.orchestry', 'teams', 'team_xyz.yml'),
     );
   });
+
+  it('resolves council report paths beside the repo, not .orchestry', () => {
+    expect(paths.planManifestPath('plan_1')).toBe(
+      path.join(root, '.orch', 'plans', 'plan_1.json'),
+    );
+    expect(paths.councilPlanJsonPath('plan_1')).toBe(
+      path.join(root, '.orch', 'plans', 'plan_1-council.json'),
+    );
+    expect(paths.councilPlanMarkdownPath('plan_1')).toBe(
+      path.join(root, 'docs', 'plans', 'plan_1-council.md'),
+    );
+  });
 });
 
 describe('sanitizeId', () => {
@@ -116,11 +128,11 @@ describe('findProjectRoot cache', () => {
   });
 
   it('caches different startDir values independently', () => {
-    const result1 = findProjectRoot('/');
+    const filesystemRoot = path.resolve('/');
+    const result1 = findProjectRoot(filesystemRoot);
     const result2 = findProjectRoot(process.cwd());
-    // Root dir has no .orchestry, so returns '/'
-    expect(result1).toBe('/');
-    // cwd should find project root or return cwd
+    // Root dir has no .orchestry, so returns the resolved start dir
+    expect(result1).toBe(filesystemRoot);
     expect(typeof result2).toBe('string');
   });
 });

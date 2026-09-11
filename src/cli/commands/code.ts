@@ -33,6 +33,10 @@ export function registerCodeCommand(program: Command, container: LightContainer)
           console.log(JSON.stringify(status, null, 2));
           return;
         }
+        container.eventBus.emit({
+          type: status.current ? 'code_intelligence:index_refreshed' : 'code_intelligence:index_stale',
+          repo: status.repo,
+        });
         const pairs: Array<[string, string]> = [
           ['Repo', status.repo],
           ['Available', status.available ? 'yes' : 'no'],
@@ -61,6 +65,10 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         const status = await intelligence.getRepositoryStatus({
           repository_root: container.context.projectRoot,
         });
+        container.eventBus.emit({
+          type: status.current ? 'code_intelligence:index_refreshed' : 'code_intelligence:index_stale',
+          repo: status.repo,
+        });
         if (container.context.json) {
           console.log(JSON.stringify(status, null, 2));
           return;
@@ -80,6 +88,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
 
   code
     .command('search <query>')
+    .alias('query')
     .description('Search existing symbols/files')
     .option('--worktree <path>', 'Worktree to bind')
     .action(async (query: string, opts: { worktree?: string }) => {
@@ -100,6 +109,37 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         for (const hit of hits) {
           console.log(`  ${hit.path}${hit.symbol ? `#${hit.symbol}` : ''}`);
         }
+      } catch (err) {
+        printError(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      } finally {
+        await close();
+      }
+    });
+
+  code
+    .command('context <symbol>')
+    .description('Show GitNexus context for a named symbol')
+    .option('--worktree <path>', 'Worktree to bind')
+    .action(async (symbol: string, opts: { worktree?: string }) => {
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
+      try {
+        const context = await intelligence.getSymbolContext({
+          symbol,
+          worktree: opts.worktree ?? container.context.projectRoot,
+        });
+        if (container.context.json) {
+          console.log(JSON.stringify(context, null, 2));
+          return;
+        }
+        printKeyValue([
+          ['Symbol', context.symbol],
+          ['Path', context.path ?? ''],
+          ['Kind', context.kind ?? ''],
+          ['Callers', String(context.callers.length)],
+          ['Callees', String(context.callees.length)],
+          ['Processes', context.processes.join(', ') || 'none'],
+        ]);
       } catch (err) {
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
@@ -130,6 +170,36 @@ export function registerCodeCommand(program: Command, container: LightContainer)
           ['Total', String(report.total_dependents)],
         ]);
         if (report.unresolved) console.log(`  ${dim('unresolved / unknown risk')}`);
+      } catch (err) {
+        printError(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      } finally {
+        await close();
+      }
+    });
+
+  code
+    .command('processes [query]')
+    .description('List GitNexus execution processes')
+    .option('--worktree <path>', 'Worktree to bind')
+    .action(async (query: string | undefined, opts: { worktree?: string }) => {
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
+      try {
+        const processes = await intelligence.getProcesses({
+          query,
+          worktree: opts.worktree ?? container.context.projectRoot,
+        });
+        if (container.context.json) {
+          console.log(JSON.stringify(processes, null, 2));
+          return;
+        }
+        if (processes.length === 0) {
+          console.log(dim('  No processes'));
+          return;
+        }
+        for (const item of processes) {
+          console.log(`  ${item.name}${item.steps.length ? `  ${item.steps.length} steps` : ''}`);
+        }
       } catch (err) {
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;

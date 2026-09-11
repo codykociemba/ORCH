@@ -478,16 +478,51 @@ WantedBy=multi-user.target
 
 ## Team engineering workflow
 
-This fork ships a repo-installed team workflow (`.orch/workflow.yml`):
+This fork ships a repo-installed team workflow (`.orch/workflow.yml`). `orch init` enables code admission and conventions by default; Linear stays off until `orch integration login`. Existing repos opt in with `orch workflow setup`.
+
+1. ORCH/Claude drafts (`orch plan "<goal>"`)
+2. Compound Engineering owns the durable plan methodology
+3. Codex verifies 1–2 unit plans (`orch plan verify`)
+4. Council validates large/high-risk plans (`orch council <plan.json>`)
+5. Tasks mirror to Linear when enabled (`orch integration login`)
+6. Agents implement in isolated worktrees under a Modification Contract
+7. Conventions (header-only comments, no parallel utils) fail admission audit and proof when enabled
+8. PRs automatically link to Linear
+9. Human or Cursor reviews
+10. ORCH publishes proof to the PR + Linear (`orch proof publish`)
+11. Merge (canonical wiki publish is default-branch only)
+12. Durable learnings go to `docs/solutions/`
+
+Detailed workflow docs:
+
+- [`docs/workflow.md`](docs/workflow.md)
+- [`skills/library/workflow.md`](skills/library/workflow.md)
+- [`skills/library/council.md`](skills/library/council.md)
+- [`skills/library/linear-sync.md`](skills/library/linear-sync.md)
+- [`skills/library/proof.md`](skills/library/proof.md)
+- [`skills/library/code-admission.md`](skills/library/code-admission.md)
 
 - **ORCH** is the only execution scheduler. Compound Engineering owns planning / review / learning methodology — not a second scheduler.
-- **GitNexus** is the sole code graph. ORCH owns reuse-first **code admission**. Unplanned tasks get a zero-create Modification Contract; new files/symbols/deps need `orch admission request`. The watcher decides. Strong exact hits skip the LLM. Git + GitNexus audit runs before worktree merge-back.
-- **Linear** mirroring is deterministic (`task.external.linear`) when `linear.enabled` is set. **Proof** binds to HEAD SHA (`orch proof`). **Wiki** generate/preview is allowed on PRs; canonical publish is default-branch only (`orch wiki publish`).
+- **GitNexus** is the sole code graph. ORCH owns reuse-first **code admission**. Before coding, ORCH/CE + GitNexus find existing seams. During coding, workers stay inside a Modification Contract. New files/symbols/deps need `orch admission request` (the watcher decides; strong exact hits skip the LLM). After coding, Git + GitNexus audit the actual diff before worktree merge-back. Only then: tests / review / proof / merge.
+- **Linear** mirroring is deterministic (`task.external.linear`) when `linear.enabled` is set. Desktop Linear / Cursor MCP cannot sign this CLI — use `orch integration login` or `LINEAR_API_KEY`. **Proof** binds to HEAD SHA (`orch proof`). **Wiki** generate/preview is allowed on PRs; canonical publish is default-branch only (`orch wiki publish`). An empty GitHub wiki needs one human page first (`orch wiki status` prints the `_new` URL).
 - Supported GitNexus runtime: Linux / macOS / WSL2. On Windows, ORCH prefers WSL GitNexus (`GITNEXUS_BIN=wsl`). Native Windows is best-effort.
+
+Install the team surfaces this fork expects:
+
+| Surface | What to install |
+|---|---|
+| Claude Code | `claude` CLI — default lead planner / council member |
+| Compound Engineering | Cursor/Claude CE skills (`ce-plan`, `ce-code-review`, …). Do not run `lfg` / whole-plan `ce-work` on the ORCH task graph |
+| Codex | `codex` CLI — small-plan verify + council member |
+| Cursor Agent | `%LOCALAPPDATA%\cursor-agent\agent.cmd` (Grok 4.6) — council + human-or-cursor review |
+| Linear | `orch integration login` or `LINEAR_API_KEY`. Desktop Linear / Cursor MCP cannot sign this CLI |
+| GitHub | logged-in `gh` locally; `GITHUB_TOKEN` only in CI. Optional Linear GitHub integration for PR metadata |
+| Cursor review Action | repo secret `CURSOR_API_KEY` on trusted same-repo PRs only |
 
 ```bash
 orch workflow doctor
 orch admission show <task>          # no PID lock
+orch admission audit <task>         # includes conventions when enabled
 orch code search "retry"
 orch code detect                    # worktree-bound semantic diff
 orch plan draft "Add retry behavior"
@@ -508,13 +543,15 @@ orch doctor                        # System diagnostics
 orch update                        # Check for updates
 orch workflow doctor               # Team workflow config
 orch admission request|show|audit  # Code admission (no PID lock)
-orch code search|impact|status|detect  # GitNexus graph
+orch code search|context|impact|status|detect|processes  # GitNexus graph
 orch proof <task>                  # Verification proof
 orch wiki status|preview|publish   # Wiki (publish = default branch)
 orch integration status            # Linear / GitHub sync
-orch plan draft "<goal>"           # Draft + route a CE plan (no dispatch)
+orch plan "<goal>"                 # Preferred: draft + route a CE plan (no dispatch)
+orch plan draft "<goal>"           # Same as `orch plan "<goal>"`
 orch plan validate|import|reuse|verify  # Route / reuse-check a CE plan
 orch council convene <plan.json>   # Independent Claude+Codex+Cursor (Grok 4.6) review
+orch council override <planId> --reason "…"  # Human unlock (not an approve)
 orch review ingest --task <id>     # Store Cursor/human review on HEAD SHA
 orch pr body|create <task>         # Linear magic-word PR
 orch proof publish <task>          # Linear + GitHub proof bound to SHA

@@ -2233,6 +2233,38 @@ describe('Attachments display', () => {
     expect(lastFrame()!).not.toContain('\uD83D\uDCCE');
   });
 
+  it('marks TaskList rows that have no Linear issue', () => {
+    const tasks = [
+      makeTask({ id: '1', title: 'Needs Linear' }),
+      makeTask({
+        id: '2',
+        title: 'Has Linear',
+        external: { linear: { id: 'iss_1', identifier: 'KON-1' } },
+      }),
+    ];
+    const { lastFrame } = render(
+      React.createElement(TaskList, { tasks }),
+    );
+    const output = lastFrame()!;
+    expect(output).toContain(' LIN');
+    expect(output).toContain('Needs Linear');
+    expect(output).toContain('Has Linear');
+  });
+
+  it('does not mark TaskList rows that already have a Linear issue', () => {
+    const tasks = [
+      makeTask({
+        id: '1',
+        title: 'Synced issue',
+        external: { linear: { id: 'iss_1', identifier: 'KON-1' } },
+      }),
+    ];
+    const { lastFrame } = render(
+      React.createElement(TaskList, { tasks }),
+    );
+    expect(lastFrame()!).not.toContain(' LIN');
+  });
+
   it('hides 📎 indicator in TaskList when attachments array is empty', () => {
     const tasks = [
       makeTask({ id: '1', title: 'Empty attachments', attachments: [] }),
@@ -2264,6 +2296,74 @@ describe('Attachments display', () => {
     expect(output).toContain('attachments');
     expect(output).toContain('design.png');
     expect(output).toContain('spec.md');
+  });
+
+  it('shows missing Linear issue in DetailPanel', async () => {
+    const tasks = [
+      makeTask({
+        id: '1',
+        title: 'Needs Linear',
+        feedback: 'Linear login required — orch integration login',
+      }),
+    ];
+    const state: OrchestratorState = { ...DEFAULT_STATE };
+    const { stdin, lastFrame } = render(
+      React.createElement(App, { projectName: 'test', tasks, state }),
+    );
+
+    stdin.write('\r');
+    await delay(50);
+    const output = lastFrame()!;
+
+    expect(output).toContain('DETAIL');
+    expect(output).toContain('linear');
+    expect(output).toContain('missing');
+    expect(output).toContain('sync');
+  });
+
+  it('shows worker worktree path in DetailPanel', async () => {
+    const tasks = [
+      makeTask({
+        id: '1',
+        title: 'Linked worktree',
+        workspace: '/repo/.orch/worktrees/tsk_1',
+      }),
+    ];
+    const state: OrchestratorState = { ...DEFAULT_STATE };
+    const { stdin, lastFrame } = render(
+      React.createElement(App, { projectName: 'test', tasks, state }),
+    );
+
+    stdin.write('\r');
+    await delay(50);
+    const output = lastFrame()!;
+
+    expect(output).toContain('DETAIL');
+    expect(output).toContain('worktree');
+    expect(output).toContain('/repo/.orch/worktrees/tsk_1');
+  });
+
+  it('shows deleted symbols and affected processes in DetailPanel', async () => {
+    const tasks = [
+      makeTask({
+        id: '1',
+        title: 'Audit report',
+        feedback: 'admission: deleted symbols: oldHelper\nadmission: processes: RetryFlow',
+      }),
+    ];
+    const state: OrchestratorState = { ...DEFAULT_STATE };
+    const { stdin, lastFrame } = render(
+      React.createElement(App, { projectName: 'test', tasks, state }),
+    );
+
+    stdin.write('\r');
+    await delay(50);
+    const output = lastFrame()!;
+
+    expect(output).toContain('DETAIL');
+    expect(output).toContain('code admission');
+    expect(output).toContain('oldHelper');
+    expect(output).toContain('RetryFlow');
   });
 
   it('hides attachments section in DetailPanel when task has no attachments', async () => {

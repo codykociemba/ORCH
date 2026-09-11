@@ -4410,6 +4410,116 @@ function formatEvent(
       addMsg(`Cascade failed (dep: ${event.failedDependencyId})`, tuiColors.red,
         { taskId: event.taskId, detail: event.reason, msgType: 'error' });
       break;
+    case 'integration:linear_issue_created':
+      addMsg(`Linear ${event.identifier}`, tuiColors.cyan,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:linear_issue_updated':
+      addMsg(`Linear ${event.identifier ?? ''} ${event.from ?? ''} \u2192 ${event.to ?? ''}`.trim(), tuiColors.cyan,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:linear_comment_published':
+      addMsg(`Linear ${event.kind} comment`, tuiColors.cyan,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:github_pr_linked':
+    case 'github:pr_created':
+    case 'github:pr_updated':
+      addMsg(`PR ${event.url}`, tuiColors.cyan,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'github:pr_reviewed':
+      addMsg(`PR review ${event.verdict}`, tuiColors.cyan,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'github:pr_merged':
+      addMsg(`PR merged ${event.sha.slice(0, 7)}`, tuiColors.green,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:proof_published':
+      addMsg(`Proof ${event.headSha.slice(0, 7)}`, tuiColors.green,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:sync_retry':
+      addMsg(`${event.provider} retry`, tuiColors.yellow,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'integration:sync_failed':
+      addMsg(`${event.provider} sync failed`, tuiColors.red,
+        { taskId: event.taskId, detail: event.error, msgType: 'error' });
+      break;
+    case 'planning:council_completed':
+      addMsg(`Council ${event.verdict}`, tuiColors.cyan, { msgType: 'system' });
+      break;
+    case 'planning:council_blocked':
+      addMsg(`Council blocked`, tuiColors.yellow, { detail: event.reason, msgType: 'error' });
+      break;
+    case 'planning:council_overridden':
+      addMsg(`Council override`, tuiColors.yellow, { detail: event.reason, msgType: 'system' });
+      break;
+    case 'learning:created':
+      addMsg(`Learning ${event.goalId}`, tuiColors.amber, { msgType: 'system' });
+      break;
+    case 'code_admission:request_created':
+      addMsg(`Admission ${event.requestType}`, tuiColors.amber,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'code_admission:request_decided':
+      addMsg(event.approved ? 'Admission approved' : 'Admission rejected', event.approved ? tuiColors.green : tuiColors.red,
+        { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'code_admission:audit_completed':
+      addMsg(event.passed ? 'Admission audit pass' : 'Admission audit fail', event.passed ? tuiColors.green : tuiColors.red,
+        {
+          taskId: event.taskId,
+          detail: [
+            event.violations.join('; '),
+            event.deleted_symbols?.length ? `deleted ${event.deleted_symbols.join(', ')}` : '',
+            event.processes?.length ? `processes ${event.processes.join(', ')}` : '',
+          ].filter(Boolean).join(' · '),
+          msgType: event.passed ? 'system' : 'error',
+        });
+      break;
+    case 'workspace:conventions_passed':
+      addMsg('Conventions pass', tuiColors.green, { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'workspace:conventions_failed':
+      addMsg('Conventions fail', tuiColors.red, {
+        taskId: event.taskId,
+        detail: event.violations.join('; '),
+        msgType: 'error',
+      });
+      break;
+    case 'code_intelligence:index_stale':
+      addMsg(`GitNexus index stale (${event.repo})`, tuiColors.yellow, { taskId: event.taskId, msgType: 'error' });
+      break;
+    case 'code_intelligence:index_refreshed':
+      addMsg(`GitNexus index current (${event.repo})`, tuiColors.green, { taskId: event.taskId, msgType: 'system' });
+      break;
+    case 'wiki:generated':
+      addMsg(`Wiki generated on ${event.branch}`, tuiColors.green, { msgType: 'system' });
+      break;
+    case 'wiki:generation_started':
+      addMsg(`Wiki generate ${event.mode}`, tuiColors.amber, { msgType: 'system' });
+      break;
+    case 'wiki:generation_completed':
+      addMsg(`Wiki generated ${event.pages} page(s)`, tuiColors.green, { msgType: 'system' });
+      break;
+    case 'wiki:publish_started':
+      addMsg(`Wiki publish ${event.provider}`, tuiColors.amber, { msgType: 'system' });
+      break;
+    case 'wiki:publish_blocked':
+      addMsg(`Wiki publish blocked on ${event.defaultBranch}`, tuiColors.yellow, { msgType: 'error' });
+      break;
+    case 'wiki:published':
+      addMsg(`Wiki published on ${event.host}`, tuiColors.green, { msgType: 'system' });
+      break;
+    case 'wiki:bootstrap_required':
+      addMsg('Wiki bootstrap required', tuiColors.yellow, { msgType: 'error' });
+      break;
+    case 'wiki:failed':
+      addMsg(`Wiki ${event.stage} failed`, tuiColors.red, { detail: event.error, msgType: 'error' });
+      break;
   }
 }
 

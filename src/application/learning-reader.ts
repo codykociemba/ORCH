@@ -21,9 +21,11 @@ export async function listLearnings(repoRoot: string, limit = 12): Promise<Learn
     return [];
   }
   const notes: LearningNote[] = [];
-  for (const name of names.slice(0, limit)) {
+  for (const name of names) {
+    if (notes.length >= limit) break;
     try {
       const text = await readFile(path.join(dir, name), 'utf8');
+      if (/^status:\s*stale\b/im.test(text)) continue;
       const title = /^title:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? name;
       const goalId = /^goal_id:\s*(.+)$/m.exec(text)?.[1]?.trim();
       notes.push({

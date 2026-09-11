@@ -86,6 +86,12 @@ async function runServe(container: Container, currentVersion: string, opts: Serv
     pid: process.pid,
     poll_interval_ms: container.config.scheduling.poll_interval_ms,
   });
+  if (container.workflowConfig?.linear?.enabled === true && !container.integrationService.enabled()) {
+    logger.log('warn', 'integration:sync_failed', {
+      provider: 'linear',
+      error: 'Linear login required — orch integration login',
+    });
+  }
 
   // Background update check — log result so operators can see it in logs
   import('../update-check.js')

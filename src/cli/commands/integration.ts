@@ -29,8 +29,11 @@ export function registerIntegrationCommand(program: Command, container: LightCon
       const pending = await container.outboxStore.list('pending');
       const failed = await container.outboxStore.list('failed');
       printKeyValue([
-        ['Linear', container.integrationService.enabled() ? 'configured' : 'off'],
+        ['Linear', container.workflowConfig?.linear?.enabled === true
+          ? (container.integrationService.enabled() ? 'configured' : 'enabled — login required')
+          : 'off'],
         ['Credential', resolveLinearApiKey() ? 'present (env or ~/.orchestry/linear.token)' : 'missing — orch integration login'],
+        ['Status owner', (container.workflowConfig?.linear as { status_owner?: string } | undefined)?.status_owner ?? 'hybrid'],
         ['Required before dispatch', container.integrationService.requiredBeforeDispatch() ? 'yes' : 'no'],
         ['Outbox pending', String(pending.length)],
         ['Outbox failed', String(failed.length)],
@@ -61,6 +64,65 @@ export function registerIntegrationCommand(program: Command, container: LightCon
     });
 
   integration
+    .command('drain')
+    .description('Replay pending/failed Linear outbox entries')
+    .action(async () => {
+      const entries = [
+        ...await container.outboxStore.list('pending'),
+        ...await container.outboxStore.list('failed'),
+      ];
+      if (entries.length === 0) {
+        printSuccess('outbox empty');
+        return;
+      }
+      const { outboxRetryDue } = await import('../../infrastructure/integrations/outbox-store.js');
+      for (const entry of entries) {
+        if (!entry.kind.startsWith('linear.')) continue;
+        if (!outboxRetryDue(entry)) {
+          console.log(`  ${entry.task_id} ${entry.kind} waiting on backoff (attempt ${entry.attempts})`);
+          continue;
+        }
+        try {
+          if (entry.kind === 'linear.proof' || entry.kind === 'linear.pr') {
+            const task = await container.taskStore.get(entry.task_id);
+            if (!task) throw new Error(`Task not found: ${entry.task_id}`);
+            if (entry.kind === 'linear.proof') {
+              await container.integrationService.publishProof(task, {
+                task_id: task.id,
+                plan_id: task.plan_id,
+                plan_unit_id: task.plan_unit_id,
+                branch: task.proof?.branch,
+                pr_url: task.proof?.pr_url ?? task.external?.github?.pr_url,
+                head_sha: task.proof?.head_sha,
+                files_changed: task.proof?.files_changed ?? [],
+                checks: [],
+                reviews: task.reviews ?? [],
+                acceptance_criteria: [],
+                verified: task.proof?.verified === true,
+              });
+            } else if (task.external?.github?.pr_url) {
+              await container.integrationService.linkPullRequest(
+                task,
+                task.external.github.pr_url,
+                task.external.github.pr_number,
+              );
+            }
+            entry.status = 'done';
+            delete entry.last_error;
+            await container.outboxStore.save(entry);
+            printSuccess(`${entry.task_id} ${entry.kind}`);
+            continue;
+          }
+          const task = await container.integrationService.retry(entry.task_id);
+          printSuccess(`${entry.task_id} ${task.external?.linear?.identifier ?? entry.status}`);
+        } catch (err) {
+          printError(`${entry.task_id}: ${err instanceof Error ? err.message : String(err)}`);
+          process.exitCode = 1;
+        }
+      }
+    });
+
+  integration
     .command('sync <taskId>')
     .description('Create/retry Linear issue for a task')
     .action(async (taskId: string) => {
@@ -72,6 +134,10 @@ export function registerIntegrationCommand(program: Command, container: LightCon
       }
       await container.integrationService.onTaskCreated(task);
       const updated = await container.taskStore.get(taskId);
+      if (updated?.external?.linear?.identifier) {
+        const renamed = await renameWorktreeAfterLinear(container, updated);
+        if (renamed) console.log(`  Branch: ${renamed}`);
+      }
       printSuccess(updated?.external?.linear?.identifier ?? 'sync attempted');
     });
 
@@ -125,6 +191,60 @@ export function registerIntegrationCommand(program: Command, container: LightCon
       clearStoredLinearApiKey();
       printSuccess('Linear credential removed');
     });
+}
+
+/** Spec §7.1: after Linear create, rename `orchestry/…` → `orch/ENG-123-slug` when safe. */
+async function renameWorktreeAfterLinear(
+  container: LightContainer,
+  task: import('../../domain/task.js').Task,
+): Promise<string | undefined> {
+  const { worktreeBranchName } = await import('../../infrastructure/workspace/workspace-manager.js');
+  const desired = worktreeBranchName(task);
+  const current = task.proof?.branch?.trim() ?? '';
+  if (!current || current === desired || /^(main|master|develop|HEAD)$/i.test(current)) return undefined;
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execFileAsync = promisify(execFile);
+  const root = container.context.projectRoot;
+  try {
+    const { stdout: upstream } = await execFileAsync(
+      'git',
+      ['for-each-ref', '--format=%(upstream)', `refs/heads/${current}`],
+      { cwd: root, timeout: 10_000, windowsHide: true },
+    );
+    if (upstream.trim()) return undefined;
+  } catch {
+    // Missing ref is fine.
+  }
+  const { sanitizeId } = await import('../../infrastructure/storage/paths.js');
+  const path = await import('node:path');
+  const worktree = task.workspace ?? path.join(container.paths.root, 'workspaces', sanitizeId(task.id));
+  for (const cwd of [worktree, root]) {
+    try {
+      await execFileAsync('git', ['rev-parse', '--verify', desired], {
+        cwd: root,
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      return undefined;
+    } catch {
+      // Desired name is free.
+    }
+    try {
+      await execFileAsync('git', ['branch', '-m', current, desired], {
+        cwd,
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      task.proof = { ...task.proof, files_changed: task.proof?.files_changed ?? [], branch: desired };
+      task.updated_at = new Date().toISOString();
+      await container.taskStore.save(task);
+      return desired;
+    } catch {
+      // Try the next cwd.
+    }
+  }
+  return undefined;
 }
 
 function openLinearKeySettings(): void {

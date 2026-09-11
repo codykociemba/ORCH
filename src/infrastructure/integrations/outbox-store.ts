@@ -6,6 +6,18 @@ import { nanoid } from 'nanoid';
 import type { Paths } from '../storage/paths.js';
 import { ensureDir, listFiles, readJson, writeJson } from '../storage/fs-utils.js';
 import type { OutboxEntry, OutboxStatus } from '../../domain/integration.js';
+import { calculateRetryDelay } from '../../domain/transitions.js';
+
+/** Spec §6.3: pending first try is immediate; later drain waits on exponential backoff. */
+export function outboxRetryDue(
+  entry: Pick<OutboxEntry, 'attempts' | 'status' | 'updated_at'>,
+  now = Date.now(),
+): boolean {
+  if (entry.status === 'pending' && entry.attempts === 0) return true;
+  const updated = Date.parse(entry.updated_at);
+  if (Number.isNaN(updated)) return true;
+  return now - updated >= calculateRetryDelay(Math.max(0, entry.attempts), 1_000, 30_000);
+}
 
 export class OutboxStore {
   constructor(private readonly paths: Paths) {}

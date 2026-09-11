@@ -92,6 +92,10 @@ export interface WorkflowConfig {
 
 export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
   version: 1,
+  orchestration: {
+    lead_adapter: 'claude',
+    require_plan_before_dispatch: false,
+  },
   code_intelligence: {
     provider: 'gitnexus',
     required: false,
@@ -126,6 +130,20 @@ export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
       unknown: 'fail_closed',
     },
   },
+  linear: {
+    enabled: false,
+    required_before_dispatch: false,
+    api_key_env: 'LINEAR_API_KEY',
+  },
+  github: {
+    enabled: true,
+    publish_proof: true,
+  },
+  review: {
+    require_review_before_merge: true,
+    policy: 'human_or_cursor',
+    accepted_reviewers: ['human', 'cursor'],
+  },
   council: {
     enabled: true,
     required_task_count: 5,
@@ -155,3 +173,31 @@ export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
 export function isAdmissionEnabled(config: WorkflowConfig | null): boolean {
   return config?.code_admission?.enabled === true;
 }
+
+/** Written by `orch init` so a new repo has CE methodology without a second scheduler. */
+export const DEFAULT_COMPOUND_YML = `# Compound Engineering is the planning/review/learning methodology.
+# ORCH is the only execution scheduler. Do not run lfg or whole-plan ce-work
+# against the same task graph.
+methodology: compound-engineering
+scheduler: orch
+lead: claude
+verify: codex
+council:
+  required_task_count: 5
+  members:
+    - claude
+    - codex
+    - cursor-grok
+invoke:
+  - ce-brainstorm
+  - ce-plan
+  - ce-doc-review
+  - ce-code-review
+  - ce-simplify-code
+  - ce-compound
+  - ce-compound-refresh
+forbidden:
+  - lfg
+  - ce-work
+learnings: docs/solutions
+`;

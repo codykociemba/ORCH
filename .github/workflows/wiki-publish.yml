@@ -37,14 +37,20 @@ jobs:
             echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY."
             exit 0
           fi
-          gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+          npm ci
+          npx tsx src/bin/cli.ts wiki generate
 
       - name: Publish to provider wiki
         env:
           ORCH_GITHUB_WIKI_TOKEN: ${{ secrets.ORCH_GITHUB_WIKI_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if ! find .gitnexus/wiki -name '*.md' | grep -q .; then
+            echo "No generated wiki pages — skip canonical publish."
+            exit 0
+          fi
           echo "Trusted default-branch context: ${GITHUB_REF_NAME}"
-          npm ci
+          git checkout -B "${GITHUB_REF_NAME}"
           npx tsx src/bin/cli.ts wiki publish
           echo "Do not use --force. PR previews belong in wiki-preview.yml."
+          echo "BOOTSTRAP_REQUIRED exits 1 — create the first GitHub wiki page, then rerun."

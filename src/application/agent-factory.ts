@@ -20,6 +20,7 @@ export function isMcpSkill(skill: string): boolean {
  *
  * - Resolves the concrete model string from adapter + tier
  * - Filters out MCP skills for non-Claude adapters (they only work with Claude CLI)
+ * - Injects team workflow + code-admission without changing the 4-skill shop catalog
  */
 export function templateToAgentInput(
   template: AgentShopTemplate,
@@ -32,9 +33,11 @@ export function templateToAgentInput(
   }
 
   const model = resolveModel(adapter, template.tier);
-  const skills = adapter === 'claude'
+  const baseSkills = adapter === 'claude'
     ? template.skills
     : template.skills.filter((s) => !isMcpSkill(s));
+  const teamSkills = ['workflow', 'code-admission'];
+  const skills = [...baseSkills, ...teamSkills.filter((skill) => !baseSkills.includes(skill))];
 
   return {
     name: template.name,

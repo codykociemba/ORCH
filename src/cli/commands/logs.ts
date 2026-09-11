@@ -272,6 +272,66 @@ async function followLive(
       case 'orchestrator:stall_detected':
         console.log(`  ${dim(time)}  ${getIcon('warning')} STALL  ${event.runId}`);
         break;
+      case 'integration:linear_issue_created':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Linear ${event.identifier}`);
+        break;
+      case 'integration:linear_issue_updated':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Linear ${event.identifier ?? event.taskId} ${event.to ?? ''}`);
+        break;
+      case 'integration:github_pr_linked':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} PR ${event.url}`);
+        break;
+      case 'integration:proof_published':
+        console.log(`  ${dim(time)}  ${getIcon('done')} Proof ${event.headSha.slice(0, 7)}`);
+        break;
+      case 'integration:sync_failed':
+        console.log(`  ${dim(time)}  ${getIcon('failed')} ${event.provider} ${event.error}`);
+        break;
+      case 'planning:council_completed':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Council ${event.verdict}`);
+        break;
+      case 'planning:council_blocked':
+        console.log(`  ${dim(time)}  ${getIcon('warning')} Council blocked: ${event.reason}`);
+        break;
+      case 'planning:council_overridden':
+        console.log(`  ${dim(time)}  ${getIcon('warning')} Council override: ${event.reason} (${event.taskCount} task(s))`);
+        break;
+      case 'integration:sync_retry':
+        console.log(`  ${dim(time)}  ${getIcon('retrying')} ${event.provider} retry ${event.taskId}`);
+        break;
+      case 'integration:linear_comment_published':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Linear comment ${event.kind} ${event.taskId}`);
+        break;
+      case 'code_admission:contract_created':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Admission contract ${event.taskId}`);
+        break;
+      case 'code_admission:request_created':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Admission ${event.requestType} ${event.requestId}`);
+        break;
+      case 'code_admission:request_decided':
+        console.log(`  ${dim(time)}  ${getIcon(event.approved ? 'done' : 'failed')} Admission ${event.approved ? 'approved' : 'rejected'} ${event.requestId}`);
+        break;
+      case 'code_admission:audit_started':
+        console.log(`  ${dim(time)}  ${getIcon('orchestratorEvent')} Admission audit ${event.taskId}`);
+        break;
+      case 'code_admission:audit_completed':
+        console.log(`  ${dim(time)}  ${getIcon(event.passed ? 'done' : 'failed')} Admission audit ${event.passed ? 'pass' : 'fail'} ${event.taskId}${event.deleted_symbols?.length ? ` deleted:${event.deleted_symbols.join(',')}` : ''}${event.processes?.length ? ` processes:${event.processes.join(',')}` : ''}`);
+        break;
+      case 'code_intelligence:index_stale':
+        console.log(`  ${dim(time)}  ${getIcon('warning')} GitNexus stale ${event.repo}`);
+        break;
+      case 'code_intelligence:index_refreshed':
+        console.log(`  ${dim(time)}  ${getIcon('done')} GitNexus current ${event.repo}`);
+        break;
+      case 'wiki:bootstrap_required':
+        console.log(`  ${dim(time)}  ${getIcon('warning')} Wiki first-page bootstrap required`);
+        break;
+      case 'wiki:published':
+        console.log(`  ${dim(time)}  ${getIcon('done')} Wiki published ${event.host} ${event.pages ?? ''}`.trim());
+        break;
+      case 'wiki:failed':
+        console.log(`  ${dim(time)}  ${getIcon('failed')} Wiki ${event.stage}: ${event.error}`);
+        break;
     }
   });
 

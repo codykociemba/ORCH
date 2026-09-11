@@ -13,11 +13,13 @@ dist/
 # Test coverage
 coverage/
 
-# Internal docs
-docs/
+# Internal docs (keep CE learnings and the team workflow page)
+docs/*
 !docs/solutions/
 !docs/solutions/**
 !docs/workflow.md
+!docs/plans/
+!docs/plans/**
 
 # Landing pages
 landing/
@@ -52,8 +54,6 @@ npm-debug.log*
 
 .playwright-mcp
 archive
-
-docs
 
 # Orchestry state
 .orchestry

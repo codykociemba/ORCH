@@ -97,6 +97,9 @@ async function runAll(container: Container): Promise<void> {
 
 async function runWatch(container: Container, verbose: boolean): Promise<void> {
   console.log(`${amber('orch')} · watching · poll interval ${container.config.scheduling.poll_interval_ms / 1000}s`);
+  if (container.workflowConfig?.linear?.enabled === true && !container.integrationService.enabled()) {
+    printError('Linear login required — orch integration login');
+  }
   console.log('━'.repeat(43));
   console.log();
 
@@ -124,6 +127,18 @@ async function runWatch(container: Container, verbose: boolean): Promise<void> {
       case 'orchestrator:tick':
         // Update status line
         process.stdout.write(`\r${amber('orch')} · watching · ${event.running} running · ${event.queued} queued    `);
+        break;
+      case 'integration:sync_failed':
+        console.log(`${dim(time)}  ${getIcon('warning')} LINEAR  ${event.error}${event.taskId ? ` · ${event.taskId}` : ''}`);
+        break;
+      case 'wiki:bootstrap_required':
+        console.log(`${dim(time)}  ${getIcon('warning')} WIKI  first-page bootstrap required`);
+        break;
+      case 'code_admission:audit_completed':
+        console.log(`${dim(time)}  ${getIcon(event.passed ? 'done' : 'failed')} ADMISSION  ${event.passed ? 'pass' : 'fail'}  ${event.taskId}`);
+        break;
+      case 'code_admission:request_decided':
+        console.log(`${dim(time)}  ${getIcon(event.approved ? 'done' : 'failed')} ADMISSION  ${event.approved ? 'approved' : 'rejected'}  ${event.requestId}`);
         break;
       case 'orchestrator:stall_detected':
         console.log(`${dim(time)}  ${getIcon('warning')} STALL  ${event.runId}`);

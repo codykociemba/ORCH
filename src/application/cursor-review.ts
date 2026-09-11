@@ -22,6 +22,13 @@ const EMPTY_LISTS = {
 };
 
 export function parseCursorReview(text: string, commitSha?: string): CursorReviewResult {
+  if (!commitSha) {
+    return {
+      verdict: 'failed',
+      summary: 'Review has no commit SHA — fail closed, do not approve.',
+      ...EMPTY_LISTS,
+    };
+  }
   const match = text.match(/\{[\s\S]*"verdict"\s*:\s*"(approve|changes_requested)"[\s\S]*\}/);
   if (!match?.[0]) {
     return {
@@ -82,16 +89,23 @@ export function toReviewEvidence(
   result: CursorReviewResult,
   input: { commitSha: string; url?: string; reviewer?: string },
 ): import('../domain/evidence.js').ReviewEvidence {
+  const commitSha = result.commit_sha || input.commitSha;
   return {
     reviewer_type: 'cursor',
     reviewer: input.reviewer ?? 'cursor-cli',
     model: 'grok-4.6',
-    commit_sha: result.commit_sha ?? input.commitSha,
-    verdict: result.verdict === 'approve' ? 'approve' : result.verdict === 'changes_requested' ? 'changes_requested' : 'failed',
-    summary: result.summary,
+    commit_sha: commitSha,
+    verdict: !commitSha
+      ? 'failed'
+      : result.verdict === 'approve' ? 'approve' : result.verdict === 'changes_requested' ? 'changes_requested' : 'failed',
+    summary: !commitSha
+      ? 'Review has no commit SHA — fail closed, do not approve.'
+      : result.summary,
     url: input.url,
     timestamp: new Date().toISOString(),
-  };
+    blocking_findings: result.blocking_findings,
+    plan_deviations: result.plan_deviations,
+  } as import('../domain/evidence.js').ReviewEvidence;
 }
 
 function asStringList(value: unknown): string[] {

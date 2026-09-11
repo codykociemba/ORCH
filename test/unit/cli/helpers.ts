@@ -38,6 +38,8 @@ export function makeContainer(overrides: Partial<Container> = {}): Container {
     taskService: {
       get: vi.fn(async () => ({ id: 'tsk_1', title: 'Test task', status: 'todo' })),
       list: vi.fn(async () => [{ id: 'tsk_1', title: 'T1' }]),
+      updateStatus: vi.fn(async () => ({ id: 'tsk_1', status: 'done' })),
+      reject: vi.fn(async () => ({ id: 'tsk_1', status: 'todo' })),
     },
     agentService: {
       list: vi.fn(async () => [{ id: 'agt_1', name: 'A1' }]),
@@ -57,6 +59,8 @@ export function makeContainer(overrides: Partial<Container> = {}): Container {
     },
     eventBus: {
       onAny: vi.fn(() => vi.fn()),
+      on: vi.fn(() => vi.fn()),
+      emit: vi.fn(),
     },
     config: { scheduling: { poll_interval_ms: 5000 } } as any,
     doctorService: {
@@ -103,9 +107,17 @@ export function makeContainer(overrides: Partial<Container> = {}): Container {
       auditTask: vi.fn(async () => ({ passed: true, incomplete: false, violations: [] })),
       approveRequest: vi.fn(async () => ({ id: 'adm_1', status: 'approved' })),
       rejectRequest: vi.fn(async () => ({ id: 'adm_1', status: 'rejected' })),
+      releaseTask: vi.fn(async () => {}),
     },
     outboxStore: {
       list: vi.fn(async () => []),
+      enqueue: vi.fn(async (input: { fingerprint?: string }) => ({
+        id: 'obx_1',
+        status: 'pending',
+        attempts: 0,
+        fingerprint: input.fingerprint ?? 'fp',
+      })),
+      save: vi.fn(async () => {}),
     },
     integrationService: {
       enabled: () => false,
@@ -113,6 +125,7 @@ export function makeContainer(overrides: Partial<Container> = {}): Container {
       retry: vi.fn(async () => ({ id: 'tsk_1' })),
       onTaskCreated: vi.fn(async () => {}),
       publishProof: vi.fn(async () => {}),
+      recordReview: vi.fn(async () => {}),
       linkPullRequest: vi.fn(async () => ({})),
     },
     teamService: {

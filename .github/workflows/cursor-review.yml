@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: write
 
 jobs:
   review:
@@ -32,7 +33,7 @@ jobs:
           CURSOR_REVIEW_MODEL: grok-4.6
         run: |
           set +e
-          agent -p "$(cat .github/cursor-review-prompt.md)" --model grok-4.6 > /tmp/cursor-review.txt
+          agent -p "$(cat .github/cursor-review-prompt.md)" --model grok-4.6 --effort high > /tmp/cursor-review.txt
           echo $? > /tmp/cursor-review.exit
           set -e
           test -s /tmp/cursor-review.txt || echo '{"verdict":"changes_requested","summary":"Cursor CLI produced no output"}' > /tmp/cursor-review.txt

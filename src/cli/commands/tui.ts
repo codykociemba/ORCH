@@ -41,6 +41,7 @@ export function registerTuiCommand(program: Command, container: Container): void
 
       const onCancelTask = async (taskId: string) => {
         await container.orchestrator.cancelTask(taskId);
+        await container.codeAdmissionService.releaseTask(taskId);
       };
 
       const onRetryTask = async (taskId: string) => {
@@ -123,10 +124,34 @@ export function registerTuiCommand(program: Command, container: Container): void
       };
 
       const onApproveTask = async (taskId: string) => {
+        const task = await container.taskService.get(taskId);
+        const headSha = task.proof?.head_sha ?? await gitHead(container.context.projectRoot);
+        if (headSha) {
+          await container.integrationService.recordReview(task, {
+            reviewer_type: 'human',
+            reviewer: 'orch-tui',
+            commit_sha: headSha,
+            verdict: 'approve',
+            summary: 'Approved via orch tui',
+            timestamp: new Date().toISOString(),
+          });
+        }
         await container.taskService.updateStatus(taskId, 'done');
+        await container.codeAdmissionService.releaseTask(taskId);
       };
 
       const onRejectTask = async (taskId: string, feedback?: string) => {
+        const task = await container.taskService.get(taskId);
+        if (task.proof?.head_sha) {
+          await container.integrationService.recordReview(task, {
+            reviewer_type: 'human',
+            reviewer: 'orch-tui',
+            commit_sha: task.proof.head_sha,
+            verdict: 'changes_requested',
+            summary: feedback || 'Rejected via orch tui',
+            timestamp: new Date().toISOString(),
+          });
+        }
         await container.taskService.reject(taskId, feedback);
       };
 
@@ -389,4 +414,19 @@ export function registerTuiCommand(program: Command, container: Container): void
       // this is a belt-and-suspenders hygiene call for embedded/test scenarios.
       container.eventBus.clear();
     });
+}
+
+async function gitHead(projectRoot: string): Promise<string | undefined> {
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { stdout } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }

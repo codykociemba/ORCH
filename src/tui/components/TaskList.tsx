@@ -189,6 +189,9 @@ export const TaskRow = React.memo(function TaskRow({ task, selected, width, agen
         {(task.attachments?.length ?? 0) > 0 && (
           <Text color={tuiColors.dim}> {'\uD83D\uDCCE'}{task.attachments!.length}</Text>
         )}
+        {task.status !== 'cancelled' && !task.external?.linear?.id && (
+          <Text color={tuiColors.red}> LIN</Text>
+        )}
       </Box>
 
       {/* Goal badge */}

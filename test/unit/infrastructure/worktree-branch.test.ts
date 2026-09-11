@@ -9,7 +9,6 @@ describe('worktreeBranchName', () => {
       title: 'Add retry',
       external: { linear: { id: 'x', identifier: 'ENG-142' } },
     }));
-    expect(name).toContain('ENG-142');
-    expect(name).toContain('tsk_abc');
+    expect(name).toBe('orch/ENG-142-add-retry');
   });
 });

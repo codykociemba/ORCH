@@ -129,6 +129,21 @@ export class Paths {
     return path.join(this.councilDir, `${sanitizeId(id)}.json`);
   }
 
+  /** Spec §5.4: `.orch/plans/<plan>.json` */
+  planManifestPath(planId: string): string {
+    return path.join(this.projectRoot, '.orch', 'plans', `${sanitizeId(planId)}.json`);
+  }
+
+  /** Spec §5.4: `.orch/plans/<plan>-council.json` */
+  councilPlanJsonPath(planId: string): string {
+    return path.join(this.projectRoot, '.orch', 'plans', `${sanitizeId(planId)}-council.json`);
+  }
+
+  /** Spec §5.4: `docs/plans/<plan>-council.md` */
+  councilPlanMarkdownPath(planId: string): string {
+    return path.join(this.projectRoot, 'docs', 'plans', `${sanitizeId(planId)}-council.md`);
+  }
+
   get reviewsDir(): string {
     return path.join(this.root, 'reviews');
   }

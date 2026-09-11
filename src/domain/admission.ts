@@ -80,6 +80,8 @@ export interface AdmissionAuditResult {
   violations: AdmissionAuditViolation[];
   added_files: string[];
   added_symbols: string[];
+  deleted_symbols?: string[];
+  processes?: string[];
 }
 
 export function reservationKey(kind: Reservation['kind'], input: { path?: string; name?: string; package?: string }): string {

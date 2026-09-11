@@ -4,12 +4,18 @@ orchestration:
   require_plan_before_dispatch: false
 code_intelligence:
   provider: gitnexus
-  required: false
+  required: true
   setup:
     auto_analyze: true
     require_current_index: true
   pdg:
     default: false
+    required_for:
+      - security
+      - auth
+      - payments
+      - concurrency
+      - dataflow-sensitive
 code_admission:
   enabled: true
   require_before_dispatch: true
@@ -22,6 +28,12 @@ code_admission:
     public: require_approval
     private_small_helper: allow_if_within_approved_file
     tests: allow
+  impact:
+    low: automatic
+    medium: automatic
+    high: require_approval
+    critical: require_approval
+    unknown: fail_closed
   audit:
     require_git_diff: true
     require_gitnexus_detect_changes: true
@@ -29,13 +41,57 @@ code_admission:
     fail_on_truncated: true
 linear:
   enabled: true
-  required_before_dispatch: false
+  required_before_dispatch: true
   api_key_env: LINEAR_API_KEY
+  status_owner: hybrid
 github:
   enabled: true
   publish_proof: true
 review:
   require_review_before_merge: true
+  policy: human_or_cursor
+  high_risk_policy: human_and_cursor
+  accepted_reviewers:
+    - human
+    - cursor
+  cursor:
+    enabled: true
+    trigger: pull_request
+    model: grok-4.6
+    effort: high
+conventions:
+  enabled: true
+  organization:
+    prefer_edit_existing: true
+    no_parallel_utils: true
+    allowed_new_file_roots:
+      - src/
+      - test/
+      - docs/
+    forbidden_new_file_globs:
+      - "**/utils/**"
+      - "**/helpers/**"
+      - "**/lib/misc/**"
+    max_new_files_per_task: 8
+  comments:
+    style: file_header_only
+    header_required_on_new_files: true
+    header_max_lines: 4
+    header_min_lines: 1
+    no_inline_comments: true
+    no_jsdoc_on_functions: true
+    allowed_inline_patterns:
+      - "^\\s*//\\s*eslint-disable"
+      - "^\\s*//\\s*@ts-expect-error"
+      - "^\\s*//\\s*@ts-ignore"
+      - "^\\s*/\\*\\s*c8 ignore"
+    extensions:
+      - .ts
+      - .tsx
+      - .js
+      - .jsx
+      - .mjs
+      - .cjs
 council:
   enabled: true
   required_task_count: 5
@@ -51,6 +107,30 @@ wiki:
   enabled: true
   provider: auto
   publish_from: default_branch
+  ownership: generated_pages
+  local:
+    generate_on_setup: true
+    generate_before_orch_pr: true
+    publish: false
+  preview:
+    on_pull_request: true
+    on_pull_request_update: true
+    artifact: true
+    required_on_pull_request: true
+  publish:
+    on_default_branch: true
+    provider: auto
+    remote: auto
+    ownership: generated_pages
+  github:
+    token_env: ORCH_GITHUB_WIKI_TOKEN
+  gitlab:
+    token_env: ORCH_GITLAB_WIKI_TOKEN
+    # api_url: https://gitlab.example.com/api/v4
+  github_hosts:
+    - github.com
+  gitlab_hosts:
+    - gitlab.com
   generator:
     provider: gitnexus
     force: false

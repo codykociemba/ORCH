@@ -16,21 +16,28 @@ export function registerAdmissionCommand(program: Command, container: LightConta
     });
 
   admission
-    .command('request')
+    .command('request [kind]')
     .description('Submit a create/scope request for the watcher to decide')
     .requiredOption('--task <id>', 'Task ID')
-    .requiredOption('--type <type>', 'new_file|new_symbol|new_dependency|scope_expansion|high_risk_edit')
+    .option('--type <type>', 'new_file|new_symbol|new_dependency|scope_expansion|high_risk_edit')
     .option('--path <path>', 'Proposed file path')
     .option('--name <name>', 'Proposed symbol name')
     .option('--package <name>', 'Proposed dependency')
     .option('--need <text>', 'Why this create is necessary')
     .option('--search <queries>', 'Comma-separated GitNexus searches already tried')
     .option('--why-not-reuse <text>', 'Why existing files/symbols are not enough')
-    .action(async (opts: Record<string, string>) => {
+    .option('--candidate <items>', 'Existing candidates as name=path, comma-separated')
+    .action(async (kind: string | undefined, opts: Record<string, string>) => {
       try {
+        const type = resolveAdmissionRequestType(opts['type'], kind);
+        if (!type) {
+          printError('Need --type or a kind: new-file | new-symbol | dependency | scope | high-risk-edit');
+          process.exitCode = 1;
+          return;
+        }
         const request = await container.codeAdmissionService.submitRequest({
           task_id: opts['task'] ?? '',
-          type: opts['type'] as AdmissionRequestType,
+          type,
           proposed: {
             path: opts['path'],
             name: opts['name'],
@@ -38,6 +45,7 @@ export function registerAdmissionCommand(program: Command, container: LightConta
           },
           need: opts['need'],
           gitnexus_searches: opts['search']?.split(',').map((item) => item.trim()).filter(Boolean),
+          existing_candidates: parseAdmissionCandidates(opts['candidate']),
           why_existing_file_is_not_enough: opts['whyNotReuse'],
         });
         if (container.context.json) {
@@ -73,6 +81,7 @@ export function registerAdmissionCommand(program: Command, container: LightConta
         ['Task', contract.task_id],
         ['Source', contract.source],
         ['Index', `${contract.code_index.repo} ${contract.code_index.index_current ? 'current' : 'stale'}`],
+        ['Existing edits', String(contract.allowed_existing_edits.length)],
         ['New files', String(contract.allowed_new_files.length)],
         ['New symbols', String(contract.allowed_new_symbols.length)],
         ['Dependencies', String(contract.allowed_dependencies.length)],
@@ -139,4 +148,43 @@ export function registerAdmissionCommand(program: Command, container: LightConta
       const request = await container.codeAdmissionService.rejectRequest(requestId, opts.reason);
       printSuccess(`${request.id} rejected`);
     });
+}
+
+const ADMISSION_KIND: Record<string, AdmissionRequestType> = {
+  'new-file': 'new_file',
+  new_file: 'new_file',
+  'new-symbol': 'new_symbol',
+  new_symbol: 'new_symbol',
+  dependency: 'new_dependency',
+  'new-dependency': 'new_dependency',
+  new_dependency: 'new_dependency',
+  scope: 'scope_expansion',
+  'scope-expansion': 'scope_expansion',
+  scope_expansion: 'scope_expansion',
+  'high-risk-edit': 'high_risk_edit',
+  high_risk_edit: 'high_risk_edit',
+};
+
+function resolveAdmissionRequestType(
+  type: string | undefined,
+  kind: string | undefined,
+): AdmissionRequestType | undefined {
+  const raw = (type ?? kind ?? '').trim();
+  if (!raw) return undefined;
+  return ADMISSION_KIND[raw];
+}
+
+function parseAdmissionCandidates(
+  raw: string | undefined,
+): Array<{ symbol?: string; path: string }> | undefined {
+  if (!raw?.trim()) return undefined;
+  const items = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  if (items.length === 0) return undefined;
+  return items.map((item) => {
+    const eq = item.indexOf('=');
+    if (eq > 0) {
+      return { symbol: item.slice(0, eq).trim(), path: item.slice(eq + 1).trim() };
+    }
+    return { path: item };
+  });
 }

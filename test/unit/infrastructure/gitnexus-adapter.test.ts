@@ -105,6 +105,77 @@ describe('GitNexusCodeIntelligence', () => {
     expect(hits[0]?.path).toBe('src/application/orchestrator.ts');
   });
 
+  it('maps GitNexus 1.6 processes even when process_symbols is an empty array', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        processes: [{ name: 'RetryFlow', steps: ['dispatch', 'collect'] }],
+        process_symbols: [],
+        affected_processes: [{ name: 'HandleRunFailure' }],
+      })),
+    });
+    const processes = await adapter.getProcesses({ query: 'retry', repo: 'orch' });
+    expect(processes.map((item) => item.name)).toEqual(['RetryFlow', 'HandleRunFailure']);
+    expect(processes[0]?.steps).toEqual(['dispatch', 'collect']);
+  });
+
+  it('keeps process filePath so reuse can bind a process to a real file', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        process_symbols: [{
+          name: 'RetryFlow',
+          filePath: 'src/application/orchestrator.ts',
+          steps: ['dispatch'],
+        }],
+      })),
+    });
+    const processes = await adapter.getProcesses({ query: 'retry' });
+    expect(processes[0]?.name).toBe('RetryFlow');
+    expect(processes[0]?.steps[0]).toBe('src/application/orchestrator.ts');
+    expect(processes[0]?.steps).toContain('dispatch');
+  });
+
+  it('maps context callers, callees, and processes', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        symbol: 'retry',
+        path: 'src/retry.ts',
+        kind: 'function',
+        callers: ['dispatchTask'],
+        callees: ['sleep'],
+        processes: ['HandleRunFailure'],
+      })),
+    });
+    const context = await adapter.getSymbolContext({ symbol: 'retry', path: 'src/retry.ts' });
+    expect(context.symbol).toBe('retry');
+    expect(context.path).toBe('src/retry.ts');
+    expect(context.kind).toBe('function');
+    expect(context.callers).toContain('dispatchTask');
+    expect(context.callees).toContain('sleep');
+    expect(context.processes).toContain('HandleRunFailure');
+  });
+
+  it('maps GitNexus 1.6 context filePath and empty processes onto affected_processes', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        symbol: 'retry',
+        filePath: 'src/retry.ts',
+        processes: [],
+        affected_processes: [{ name: 'HandleRunFailure' }],
+      })),
+    });
+    const context = await adapter.getSymbolContext({ symbol: 'retry' });
+    expect(context.path).toBe('src/retry.ts');
+    expect(context.processes).toEqual(['HandleRunFailure']);
+  });
+
   it('maps impact unknown risk as unresolved', async () => {
     const adapter = new GitNexusCodeIntelligence({
       projectRoot: '/repo',
@@ -115,6 +186,22 @@ describe('GitNexusCodeIntelligence', () => {
     expect(report.risk).toBe('unknown');
     expect(report.unresolved).toBe(true);
     expect(report.direct_dependents).toBe(2);
+  });
+
+  it('maps GitNexus 1.6 affected_processes onto impact', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        risk: 'medium',
+        direct: 3,
+        processes: [],
+        affected_processes: [{ name: 'RetryFlow' }, { name: 'HandleRunFailure' }],
+      })),
+    });
+    const report = await adapter.getImpact({ target: 'retry', worktree: '/repo' });
+    expect(report.processes).toEqual(['RetryFlow', 'HandleRunFailure']);
+    expect(report.risk).toBe('medium');
   });
 
   it('maps GitNexus 1.6 changed_symbols + risk_level', async () => {
@@ -136,6 +223,20 @@ describe('GitNexusCodeIntelligence', () => {
     expect(changes.modified_symbols[0]?.name).toBe('retry');
     expect(changes.risk).toBe('high');
     expect(changes.processes).toContain('HandleRunFailure');
+  });
+
+  it('unions detect_changes processes when GitNexus 1.6 sends an empty processes list', async () => {
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: cli('{}'),
+      mcp: mcp(() => ({
+        processes: [],
+        affected_processes: [{ name: 'HandleRunFailure' }, 'MergeBack'],
+        risk_level: 'medium',
+      })),
+    });
+    const changes = await adapter.detectChanges({ worktree: '/wt' });
+    expect(changes.processes).toEqual(['HandleRunFailure', 'MergeBack']);
   });
 
   it('maps detect_changes and preserves partial/truncated', async () => {
@@ -199,6 +300,21 @@ describe('GitNexusCodeIntelligence', () => {
       cli: runner,
     });
     await adapter.analyze({ repository_root: '/repo' });
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('passes --pdg when analyze is requested for dataflow-sensitive work', async () => {
+    const runner: ICliRunner = {
+      run: vi.fn(async (_command, args) => {
+        expect(args).toEqual(['analyze', '--pdg']);
+        return { code: 0, stdout: 'indexed', stderr: '' };
+      }),
+    };
+    const adapter = new GitNexusCodeIntelligence({
+      projectRoot: '/repo',
+      cli: runner,
+    });
+    await adapter.analyze({ repository_root: '/repo', pdg: true } as Parameters<GitNexusCodeIntelligence['analyze']>[0]);
     expect(runner.run).toHaveBeenCalled();
   });
 

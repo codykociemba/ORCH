@@ -9,6 +9,13 @@ import { spawn } from 'node:child_process';
 const VERDICT_RE = /\{[\s\S]*"verdict"\s*:\s*"(approve|changes_requested)"[\s\S]*\}/;
 
 function parseCursorReview(text, commitSha) {
+  if (!commitSha) {
+    return {
+      verdict: 'failed',
+      summary: 'Review has no commit SHA — fail closed, do not approve.',
+      blocking_findings: [],
+    };
+  }
   const match = text.match(VERDICT_RE);
   if (!match?.[0]) {
     return {
@@ -61,8 +68,8 @@ function run(cmd, args) {
 const inputPath = process.argv[2];
 const sha = process.env.HEAD_SHA ?? '';
 const pr = process.env.PR_NUMBER ?? '';
-if (!inputPath || !pr) {
-  console.error('usage: node scripts/cursor-pr-review.mjs <agent-output>  (needs PR_NUMBER)');
+if (!inputPath || !pr || !sha) {
+  console.error('usage: node scripts/cursor-pr-review.mjs <agent-output>  (needs PR_NUMBER and HEAD_SHA)');
   process.exit(1);
 }
 
@@ -76,6 +83,8 @@ const artifact = {
   verdict: result.verdict === 'approve' ? 'approve' : result.verdict === 'changes_requested' ? 'changes_requested' : 'failed',
   summary: result.summary ?? 'Cursor review',
   timestamp: new Date().toISOString(),
+  blocking_findings: result.blocking_findings ?? [],
+  plan_deviations: result.plan_deviations ?? [],
 };
 await writeFile('cursor-review.json', `${JSON.stringify(artifact, null, 2)}\n`);
 
@@ -92,5 +101,30 @@ const body = [
 ].filter(Boolean).join('\n');
 
 await run('gh', ['pr', 'review', String(pr), `--event=${event === 'APPROVE' && result.verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES'}`, '--body', body]);
+
+try {
+  const conclusion = result.verdict === 'approve' ? 'success' : 'failure';
+  const title = result.verdict === 'approve' ? 'Approved' : result.verdict === 'changes_requested' ? 'Changes requested' : 'Failed';
+  await run('gh', [
+    'api',
+    '--method',
+    'POST',
+    'repos/{owner}/{repo}/check-runs',
+    '-f',
+    'name=ORCH Cursor review',
+    '-f',
+    `head_sha=${sha}`,
+    '-f',
+    'status=completed',
+    '-f',
+    `conclusion=${conclusion}`,
+    '-f',
+    `output[title]=${title}`,
+    '-f',
+    `output[summary]=ORCH Cursor review bound to ${sha}. A new commit requires a new review.`,
+  ]);
+} catch {
+  // Fail-open: the PR review comment is the canonical Cursor review artifact.
+}
 
 if (result.verdict !== 'approve') process.exit(1);

@@ -101,7 +101,8 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
 
   async analyze(input: RepositoryIdentityInput): Promise<void> {
     const cwd = input.worktree_path ?? input.repository_root ?? this.projectRoot;
-    const result = await this.cli.run(this.bin(), ['analyze'], cwd, gitnexusCliEnv());
+    const pdg = Boolean((input as { pdg?: boolean }).pdg);
+    const result = await this.cli.run(this.bin(), pdg ? ['analyze', '--pdg'] : ['analyze'], cwd, gitnexusCliEnv());
     if (result.code !== 0) {
       throw new CodeIntelligenceError(
         'GitNexus analyze failed',
@@ -142,11 +143,14 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
     const obj = asObject(raw);
     return {
       symbol: stringish(obj['symbol']) ?? input.symbol,
-      path: stringish(obj['path'] ?? obj['file']) ?? input.path,
+      path: stringish(obj['path'] ?? obj['file'] ?? obj['filePath'] ?? obj['file_path']) ?? input.path,
       kind: stringish(obj['kind'] ?? obj['type']),
       callers: asStringArray(obj['callers'] ?? obj['upstream']),
       callees: asStringArray(obj['callees'] ?? obj['downstream']),
-      processes: asStringArray(obj['processes']),
+      processes: [...new Set([
+        ...asStringArray(obj['processes']),
+        ...asStringArray(obj['affected_processes']),
+      ])],
       raw,
     };
   }
@@ -170,7 +174,10 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
       total_dependents: numberish(
         obj['total_dependents'] ?? obj['total'] ?? obj['impactedCount'] ?? summary['total'] ?? summary['impactedCount'],
       ) ?? 0,
-      processes: asStringArray(obj['processes']),
+      processes: [...new Set([
+        ...asStringArray(obj['processes']),
+        ...asStringArray(obj['affected_processes']),
+      ])],
       unresolved,
       raw,
     };
@@ -182,13 +189,29 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
       query: input.query ?? 'processes',
       repo: this.repo(input.repo) ?? this.projectRoot,
     });
-    return asArray(raw).map((item) => {
-      const obj = asObject(item);
-      return {
-        name: stringish(obj['name'] ?? obj['process'] ?? obj['symbol']) ?? 'unknown',
-        steps: asStringArray(obj['steps']),
-      };
-    });
+    const obj = asObject(raw);
+    const rows = [
+      ...asArray(obj['processes']),
+      ...asArray(obj['affected_processes']),
+      ...asArray(obj['process_symbols']),
+    ];
+    if (rows.length === 0) rows.push(...asArray(raw));
+    const seen = new Set<string>();
+    const processes: ExecutionProcess[] = [];
+    for (const item of rows) {
+      const row = asObject(item);
+      const name = stringish(row['name'] ?? row['process'] ?? row['symbol'] ?? row['label'])
+        ?? (typeof item === 'string' ? item : '');
+      if (!name || name === 'unknown' || seen.has(name)) continue;
+      seen.add(name);
+      const filePath = stringish(row['filePath'] ?? row['file_path'] ?? row['path']);
+      const steps = asStringArray(row['steps']);
+      processes.push({
+        name,
+        steps: filePath && !steps.includes(filePath) ? [filePath, ...steps] : steps,
+      });
+    }
+    return processes;
   }
 
   async close(): Promise<void> {
@@ -221,7 +244,10 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
         ...toSymbolChanges(obj['deleted_symbols'] ?? obj['deleted'], 'deleted'),
         ...changed.deleted,
       ],
-      processes: asStringArray(obj['processes'] ?? obj['affected_processes']),
+      processes: [...new Set([
+        ...asStringArray(obj['processes']),
+        ...asStringArray(obj['affected_processes']),
+      ])],
       risk: normalizeRisk(stringish(obj['risk'] ?? obj['risk_level'])),
       partial: booleanish(obj['partial']) ?? false,
       truncated: booleanish(obj['truncated']) ?? false,
@@ -270,8 +296,118 @@ export interface GitNexusIntelligenceHandle {
 export function createGitNexusIntelligence(projectRoot: string, repoName?: string): GitNexusIntelligenceHandle {
   const spec = defaultGitNexusMcpArgs();
   const mcp = new McpStdioClient(spec.command, spec.args, projectRoot);
+  const intelligence = new GitNexusCodeIntelligence({ projectRoot, mcp, repoName });
+  const rawSearchExisting = intelligence.searchExisting.bind(intelligence);
+  intelligence.searchExisting = async (input) => {
+    let hits: Awaited<ReturnType<typeof rawSearchExisting>> = [];
+    try {
+      hits = await rawSearchExisting(input);
+    } catch {
+      hits = [];
+    }
+    const needle = input.query.trim().toLowerCase();
+    if (!needle) return hits;
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const raw = JSON.parse(
+        await readFile(join(projectRoot, '.orchestry', 'admission', 'reservations.json'), 'utf8'),
+      ) as {
+        items?: Array<{ path?: string; name?: string; package?: string; kind?: string; task_id?: string }>;
+      };
+      const seen = new Set(hits.map((hit) => `${hit.path}#${hit.symbol ?? ''}`));
+      for (const row of raw.items ?? []) {
+        const hay = `${row.path ?? ''} ${row.name ?? ''} ${row.package ?? ''}`.toLowerCase();
+        if (!hay.includes(needle)) continue;
+        const reservedPath = row.path ?? row.package ?? '';
+        const key = `${reservedPath}#${row.name ?? ''}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        hits.push({
+          symbol: row.name,
+          path: reservedPath,
+          kind: row.kind,
+          score: 1,
+          snippet: `reserved by ${row.task_id ?? 'unknown'}`,
+        });
+      }
+    } catch {
+      // orch code search still returns GitNexus hits when the ledger is missing
+    }
+    return hits;
+  };
+  const rawGetImpact = intelligence.getImpact.bind(intelligence);
+  const rawGetSymbolContext = intelligence.getSymbolContext.bind(intelligence);
+  const rawDetectChanges = intelligence.detectChanges.bind(intelligence);
+  intelligence.getImpact = async (input) => {
+    const report = await rawGetImpact({
+      ...input,
+      direction: input.direction ?? 'upstream',
+    });
+    const extra: string[] = [];
+    const rawObj = report.raw && typeof report.raw === 'object' && !Array.isArray(report.raw)
+      ? report.raw as Record<string, unknown>
+      : {};
+    for (const key of ['processes', 'affected_processes']) {
+      const rows = rawObj[key];
+      if (!Array.isArray(rows)) continue;
+      for (const item of rows) {
+        if (typeof item === 'string' && item) extra.push(item);
+        else if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const row = item as Record<string, unknown>;
+          const name = [row['process'], row['label'], row['name'], row['symbol']].find((value) => typeof value === 'string' && value);
+          if (typeof name === 'string') extra.push(name);
+        }
+      }
+    }
+    const processes = [...new Set([...report.processes, ...extra])];
+    if (report.unresolved && report.risk !== 'high' && report.risk !== 'critical') {
+      return { ...report, risk: 'unknown', processes };
+    }
+    return { ...report, processes };
+  };
+  intelligence.getSymbolContext = async (input) => {
+    const context = await rawGetSymbolContext(input);
+    const extra: string[] = [];
+    const rawObj = context.raw && typeof context.raw === 'object' && !Array.isArray(context.raw)
+      ? context.raw as Record<string, unknown>
+      : {};
+    for (const key of ['processes', 'affected_processes']) {
+      const rows = rawObj[key];
+      if (!Array.isArray(rows)) continue;
+      for (const item of rows) {
+        if (typeof item === 'string' && item) extra.push(item);
+        else if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const row = item as Record<string, unknown>;
+          const name = [row['process'], row['label'], row['name'], row['symbol']].find((value) => typeof value === 'string' && value);
+          if (typeof name === 'string') extra.push(name);
+        }
+      }
+    }
+    return { ...context, processes: [...new Set([...context.processes, ...extra])] };
+  };
+  intelligence.detectChanges = async (input) => {
+    const changeset = await rawDetectChanges(input);
+    const extra: string[] = [];
+    const rawObj = changeset.raw && typeof changeset.raw === 'object' && !Array.isArray(changeset.raw)
+      ? changeset.raw as Record<string, unknown>
+      : {};
+    for (const key of ['processes', 'affected_processes']) {
+      const rows = rawObj[key];
+      if (!Array.isArray(rows)) continue;
+      for (const item of rows) {
+        if (typeof item === 'string' && item) extra.push(item);
+        else if (item && typeof item === 'object' && !Array.isArray(item)) {
+          const row = item as Record<string, unknown>;
+          const name = [row['process'], row['label'], row['name'], row['symbol']].find((value) => typeof value === 'string' && value);
+          if (typeof name === 'string') extra.push(name);
+        }
+      }
+    }
+    return { ...changeset, processes: [...new Set([...changeset.processes, ...extra])] };
+  };
   return {
-    intelligence: new GitNexusCodeIntelligence({ projectRoot, mcp, repoName }),
+    intelligence,
     close: () => mcp.close(),
   };
 }

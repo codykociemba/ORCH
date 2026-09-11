@@ -12,9 +12,9 @@ import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Paths } from '../../infrastructure/storage/paths.js';
 import { ensureDir, pathExists } from '../../infrastructure/storage/fs-utils.js';
-import { writeYaml, atomicWrite } from '../../infrastructure/storage/fs-utils.js';
+import { writeYaml, readYaml, atomicWrite } from '../../infrastructure/storage/fs-utils.js';
 import { DEFAULT_CONFIG } from '../../domain/config.js';
-import { DEFAULT_WORKFLOW_CONFIG } from '../../domain/workflow-config.js';
+import { DEFAULT_COMPOUND_YML, DEFAULT_WORKFLOW_CONFIG } from '../../domain/workflow-config.js';
 import { DEFAULT_PROMPT_TEMPLATE } from '../../infrastructure/template/template-engine.js';
 import { getDefaultAgents } from '../../domain/default-agents.js';
 import { SUPPORTED_ADAPTERS, isAdapterKind } from '../../domain/model-tiers.js';
@@ -95,7 +95,121 @@ export async function runInit(opts: { name?: string; adapter?: string } = {}): P
 
   await Promise.all([
     writeYaml(paths.configPath, config),
-    writeYaml(path.join(projectRoot, '.orch', 'workflow.yml'), DEFAULT_WORKFLOW_CONFIG),
+    writeYaml(path.join(projectRoot, '.orch', 'workflow.yml'), Object.assign(
+      {
+        ...DEFAULT_WORKFLOW_CONFIG,
+        code_admission: {
+          ...DEFAULT_WORKFLOW_CONFIG.code_admission,
+          enabled: true,
+        },
+        code_intelligence: {
+          ...DEFAULT_WORKFLOW_CONFIG.code_intelligence,
+          required: true,
+          pdg: {
+            ...(DEFAULT_WORKFLOW_CONFIG.code_intelligence?.pdg ?? { default: false }),
+            required_for: ['security', 'auth', 'payments', 'concurrency', 'dataflow-sensitive'],
+          },
+        },
+      },
+      {
+        conventions: {
+          enabled: true,
+          organization: {
+            prefer_edit_existing: true,
+            no_parallel_utils: true,
+            allowed_new_file_roots: ['src/', 'test/', 'docs/'],
+            forbidden_new_file_globs: ['**/utils/**', '**/helpers/**', '**/lib/misc/**'],
+            max_new_files_per_task: 8,
+          },
+          comments: {
+            style: 'file_header_only',
+            header_required_on_new_files: true,
+            header_max_lines: 4,
+            header_min_lines: 1,
+            no_inline_comments: true,
+            no_jsdoc_on_functions: true,
+            allowed_inline_patterns: [
+              '^\\s*//\\s*eslint-disable',
+              '^\\s*//\\s*@ts-expect-error',
+              '^\\s*//\\s*@ts-ignore',
+              '^\\s*/\\*\\s*c8 ignore',
+            ],
+            extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+          },
+        },
+      },
+    )),
+    (async () => {
+      const conventionsPath = path.join(projectRoot, '.orch', 'conventions.yml');
+      const conventionDefaults = {
+        version: 1,
+        organization: {
+          prefer_edit_existing: true,
+          no_parallel_utils: true,
+          allowed_new_file_roots: ['src/', 'test/', 'docs/'],
+          forbidden_new_file_globs: ['**/utils/**', '**/helpers/**', '**/lib/misc/**'],
+          max_new_files_per_task: 8,
+        },
+        comments: {
+          style: 'file_header_only',
+          header_required_on_new_files: true,
+          header_max_lines: 4,
+          header_min_lines: 1,
+          no_inline_comments: true,
+          no_jsdoc_on_functions: true,
+          allowed_inline_patterns: [
+            '^\\s*//\\s*eslint-disable',
+            '^\\s*//\\s*@ts-expect-error',
+            '^\\s*//\\s*@ts-ignore',
+            '^\\s*/\\*\\s*c8 ignore',
+          ],
+          extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+        },
+      };
+      if (!(await pathExists(conventionsPath))) {
+        await writeYaml(conventionsPath, conventionDefaults);
+        return;
+      }
+      const current = await readYaml<Record<string, unknown>>(conventionsPath);
+      if (!current || typeof current !== 'object') return;
+      let changed = false;
+      if (current['version'] === undefined) {
+        current['version'] = conventionDefaults.version;
+        changed = true;
+      }
+      const org = current['organization'] && typeof current['organization'] === 'object'
+        ? { ...(current['organization'] as Record<string, unknown>) }
+        : {};
+      if (current['organization'] === undefined) {
+        current['organization'] = conventionDefaults.organization;
+        changed = true;
+      } else {
+        for (const [key, value] of Object.entries(conventionDefaults.organization)) {
+          if (org[key] === undefined) {
+            org[key] = value;
+            changed = true;
+          }
+        }
+        current['organization'] = org;
+      }
+      const comments = current['comments'] && typeof current['comments'] === 'object'
+        ? { ...(current['comments'] as Record<string, unknown>) }
+        : {};
+      if (current['comments'] === undefined) {
+        current['comments'] = conventionDefaults.comments;
+        changed = true;
+      } else {
+        for (const [key, value] of Object.entries(conventionDefaults.comments)) {
+          if (comments[key] === undefined) {
+            comments[key] = value;
+            changed = true;
+          }
+        }
+        current['comments'] = comments;
+      }
+      if (changed) await writeYaml(conventionsPath, current);
+    })(),
+    atomicWrite(path.join(projectRoot, '.orch', 'compound.yml'), DEFAULT_COMPOUND_YML),
     atomicWrite(paths.gitignorePath, gitignoreContent),
     atomicWrite(paths.workspaceExcludePath, excludeContent),
     atomicWrite(paths.defaultTemplatePath(), DEFAULT_PROMPT_TEMPLATE),
@@ -113,6 +227,9 @@ export async function runInit(opts: { name?: string; adapter?: string } = {}): P
   // Output
   console.log();
   printSuccess('initialized');
+  console.log();
+  console.log(`  ${dim('.orch/workflow.yml')}  admission on (this fork); GitNexus required; Linear off until orch integration login`);
+  console.log(`  ${dim('.orch/conventions.yml')}  merge-gate rules (merge new keys only; never overwrite user values)`);
   console.log();
   console.log(`  Created ${dim('.orchestry/')}`);
   console.log(`  ${dim('├──')} config.yml`);
@@ -247,13 +364,19 @@ async function ensureRootGitignore(projectRoot: string): Promise<void> {
   try {
     const content = await fs.readFile(gitignorePath, 'utf-8');
     // Already present (as a whole line)
-    if (content.split('\n').some((line) => line.trim() === '.orchestry')) return;
-    // Append
+    const lines = content.split('\n').map((line) => line.trim());
+    const missing: string[] = [];
+    if (!lines.includes('.orchestry')) missing.push('.orchestry');
+    if (!lines.includes('.gitnexus')) missing.push('.gitnexus');
+    if (missing.length === 0) return;
     const separator = content.endsWith('\n') ? '' : '\n';
-    await fs.appendFile(gitignorePath, `${separator}\n# Orchestry state\n.orchestry\n`);
+    await fs.appendFile(
+      gitignorePath,
+      `${separator}\n# Orchestry / GitNexus runtime\n${missing.join('\n')}\n`,
+    );
   } catch {
     // No .gitignore yet — create one
-    await atomicWrite(gitignorePath, '# Orchestry state\n.orchestry\n');
+    await atomicWrite(gitignorePath, '# Orchestry / GitNexus runtime\n.orchestry\n.gitnexus\n');
   }
 }
 

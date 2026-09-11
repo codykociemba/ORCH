@@ -45,6 +45,38 @@ export class WorkflowConfigStore {
           ...DEFAULT_WORKFLOW_CONFIG.code_admission?.audit,
           ...raw.code_admission?.audit,
         },
+        impact: {
+          ...DEFAULT_WORKFLOW_CONFIG.code_admission?.impact,
+          ...raw.code_admission?.impact,
+        },
+      },
+      orchestration: {
+        ...DEFAULT_WORKFLOW_CONFIG.orchestration,
+        ...raw.orchestration,
+      },
+      linear: {
+        ...DEFAULT_WORKFLOW_CONFIG.linear,
+        ...raw.linear,
+      },
+      github: {
+        ...DEFAULT_WORKFLOW_CONFIG.github,
+        ...raw.github,
+      },
+      review: {
+        ...DEFAULT_WORKFLOW_CONFIG.review,
+        ...raw.review,
+      },
+      council: {
+        ...DEFAULT_WORKFLOW_CONFIG.council,
+        ...raw.council,
+      },
+      ponytail: {
+        ...DEFAULT_WORKFLOW_CONFIG.ponytail,
+        ...raw.ponytail,
+        implementation: {
+          ...DEFAULT_WORKFLOW_CONFIG.ponytail?.implementation,
+          ...raw.ponytail?.implementation,
+        },
       },
       wiki: {
         ...DEFAULT_WORKFLOW_CONFIG.wiki,

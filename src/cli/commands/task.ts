@@ -74,6 +74,9 @@ export function registerTaskCommand(program: Command, container: LightContainer)
         console.log(task.id);
       } else {
         printSuccess(`Created ${task.id} "${task.title}"`);
+        if (container.workflowConfig?.linear?.enabled === true && !container.integrationService.enabled()) {
+          console.log('  Linear: login required (orch integration login) — no issue created');
+        }
       }
     });
 
@@ -272,6 +275,7 @@ export function registerTaskCommand(program: Command, container: LightContainer)
       } else {
         await container.taskService.cancel(id);
       }
+      await container.codeAdmissionService.releaseTask(id);
       printSuccess(`Cancelled ${id}`);
     });
 
@@ -280,7 +284,36 @@ export function registerTaskCommand(program: Command, container: LightContainer)
     .command('approve <id>')
     .description('Approve a task in review')
     .action(async (id: string) => {
+      const task = await container.taskService.get(id);
+      let headSha = task.proof?.head_sha;
+      if (!headSha) {
+        try {
+          const { execFile } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const { stdout } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], {
+            cwd: container.context.projectRoot,
+            timeout: 10_000,
+            windowsHide: true,
+          });
+          headSha = stdout.trim();
+        } catch {
+          headSha = undefined;
+        }
+      }
+      if (headSha) {
+        await container.integrationService.recordReview(task, {
+          reviewer_type: 'human',
+          reviewer: 'orch-cli',
+          commit_sha: headSha,
+          verdict: 'approve',
+          summary: 'Approved via orch task approve',
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        console.log('  No HEAD SHA — recorded no review; proof cannot be Verified');
+      }
       await container.taskService.updateStatus(id, 'done');
+      await container.codeAdmissionService.releaseTask(id);
       printSuccess(`Approved ${id}`);
     });
 
@@ -290,6 +323,18 @@ export function registerTaskCommand(program: Command, container: LightContainer)
     .description('Reject a task and send it back for rework')
     .option('-r, --reason <reason>', 'Feedback for the agent explaining what to fix')
     .action(async (id: string, opts) => {
+      const task = await container.taskService.get(id);
+      const sha = task.proof?.head_sha;
+      if (sha) {
+        await container.integrationService.recordReview(task, {
+          reviewer_type: 'human',
+          reviewer: 'orch-cli',
+          commit_sha: sha,
+          verdict: 'changes_requested',
+          summary: opts.reason || 'Rejected via orch task reject',
+          timestamp: new Date().toISOString(),
+        });
+      }
       await container.taskService.reject(id, opts.reason);
       printSuccess(`Rejected ${id} → todo${opts.reason ? ` (reason: ${opts.reason})` : ''}`);
     });

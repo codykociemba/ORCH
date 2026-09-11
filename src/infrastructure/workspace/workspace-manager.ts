@@ -274,7 +274,7 @@ export function worktreeBranchName(task: Task): string {
   const titleSlug = sanitizeTitle(task.title) || sanitizeId(task.id);
   const linear = task.external?.linear?.identifier?.replace(/[^A-Za-z0-9._-]/g, '');
   return linear
-    ? `orchestry/${linear}/${sanitizeId(task.id)}/${titleSlug}`
+    ? `orch/${linear}-${titleSlug}`
     : `orchestry/${sanitizeId(task.id)}/${titleSlug}`;
 }
 

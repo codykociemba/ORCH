@@ -4,6 +4,7 @@
 
 import type { ExistingCodeCandidate } from './modification-contract.js';
 import type { ImpactRisk } from './code-intelligence.js';
+import type { CouncilVerdict } from './council.js';
 
 export type PlanRoute =
   | 'claude_only'
@@ -56,6 +57,12 @@ export function routePlan(unitCount: number, highRisk: boolean, requiredTaskCoun
   if (unitCount >= 3) return highRisk ? 'council_required' : 'claude_codex_optional_council';
   if (unitCount >= 1) return 'claude_plus_codex';
   return 'claude_only';
+}
+
+/** Council-required plans must not pre-authorize creates until an approve. */
+export function planAllowsReuseCreates(councilRequired: boolean, verdict?: CouncilVerdict): boolean {
+  if (!councilRequired) return true;
+  return verdict === 'approve';
 }
 
 export function planDigest(title: string, units: Array<{ title: string }>): string {

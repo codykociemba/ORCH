@@ -4,8 +4,8 @@
 
 import { nanoid } from 'nanoid';
 import type { Paths } from './paths.js';
-import { ensureDir, listFiles, readJson, writeJson } from './fs-utils.js';
-import type { CouncilResult } from '../../domain/council.js';
+import { atomicWrite, ensureDir, listFiles, readJson, writeJson } from './fs-utils.js';
+import { renderCouncilMarkdown, type CouncilResult } from '../../domain/council.js';
 
 export class CouncilStore {
   constructor(private readonly paths: Paths) {}
@@ -16,6 +16,9 @@ export class CouncilStore {
 
   async save(result: CouncilResult): Promise<void> {
     await writeJson(this.paths.councilPath(result.id), result);
+    if (!result.plan_id) return;
+    await writeJson(this.paths.councilPlanJsonPath(result.plan_id), result);
+    await atomicWrite(this.paths.councilPlanMarkdownPath(result.plan_id), renderCouncilMarkdown(result));
   }
 
   async get(id: string): Promise<CouncilResult | null> {

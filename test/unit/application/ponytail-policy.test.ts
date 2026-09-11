@@ -1,8 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePonytailMode } from '../../../src/application/ponytail-policy.js';
+import { resolvePonytailMode, renderPonytailPrompt } from '../../../src/application/ponytail-policy.js';
 import { DEFAULT_WORKFLOW_CONFIG } from '../../../src/domain/workflow-config.js';
 
 const workflow = DEFAULT_WORKFLOW_CONFIG;
+
+describe('DEFAULT_WORKFLOW_CONFIG team schema', () => {
+  it('includes Linear, GitHub, review, and orchestration keys for new installs', () => {
+    expect(workflow.orchestration?.lead_adapter).toBe('claude');
+    expect(workflow.linear?.api_key_env).toBe('LINEAR_API_KEY');
+    expect(workflow.github?.publish_proof).toBe(true);
+    expect(workflow.review?.accepted_reviewers).toEqual(['human', 'cursor']);
+    expect(workflow.council?.required_task_count).toBe(5);
+  });
+});
 
 describe('resolvePonytailMode', () => {
   it('planning is off', () => {
@@ -23,5 +33,11 @@ describe('resolvePonytailMode', () => {
 
   it('high-risk is lite', () => {
     expect(resolvePonytailMode('implementation', { labels: ['high-risk'], scope: ['src/auth/**'], priority: 1 }, workflow).mode).toBe('lite');
+  });
+
+  it('prompt says acceptance criteria override Ponytail', () => {
+    const text = renderPonytailPrompt({ mode: 'lite', reason: 'normal implementation' });
+    expect(text).toContain('acceptance criteria');
+    expect(text).toContain('Modification Contract');
   });
 });

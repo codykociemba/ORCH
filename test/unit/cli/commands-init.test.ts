@@ -104,13 +104,13 @@ describe('getDefaultAgents()', () => {
   });
 
   it('includes MCP skills for claude adapter', () => {
-    expect(getDefaultAgents('claude')[0].config.skills).toEqual(['document-skills:skill-creator']);
+    expect(getDefaultAgents('claude')[0].config.skills).toEqual(['workflow', 'code-admission', 'document-skills:skill-creator']);
   });
 
   it('excludes MCP skills for non-claude adapters', () => {
-    expect(getDefaultAgents('opencode')[0].config.skills).toEqual([]);
-    expect(getDefaultAgents('codex')[0].config.skills).toEqual([]);
-    expect(getDefaultAgents('pi')[0].config.skills).toEqual([]);
+    expect(getDefaultAgents('opencode')[0].config.skills).toEqual(['workflow', 'code-admission']);
+    expect(getDefaultAgents('codex')[0].config.skills).toEqual(['workflow', 'code-admission']);
+    expect(getDefaultAgents('pi')[0].config.skills).toEqual(['workflow', 'code-admission']);
   });
 
   it('agent has approval_policy=suggest', () => {
@@ -190,6 +190,35 @@ describe('init command', () => {
         expect.objectContaining({ id: agent.id }),
       );
     }
+  });
+
+  it('writes Compound Engineering config next to workflow.yml', async () => {
+    await program.parseAsync(['init'], { from: 'user' });
+
+    expect(mocks.atomicWrite).toHaveBeenCalledWith(
+      expect.stringMatching(/[/\\]\.orch[/\\]compound\.yml$/),
+      expect.stringContaining('scheduler: orch'),
+    );
+  });
+
+  it('enables admission and conventions for new projects in this fork', async () => {
+    await program.parseAsync(['init'], { from: 'user' });
+
+    expect(mocks.writeYaml).toHaveBeenCalledWith(
+      expect.stringMatching(/[/\\]\.orch[/\\]workflow\.yml$/),
+      expect.objectContaining({
+        code_admission: expect.objectContaining({ enabled: true }),
+        conventions: expect.objectContaining({ enabled: true }),
+        linear: expect.objectContaining({ enabled: false }),
+      }),
+    );
+    expect(mocks.writeYaml).toHaveBeenCalledWith(
+      expect.stringMatching(/[/\\]\.orch[/\\]conventions\.yml$/),
+      expect.objectContaining({
+        version: 1,
+        organization: expect.objectContaining({ no_parallel_utils: true }),
+      }),
+    );
   });
 
   it('uses paths.agentPath(agent.id) for the write path', async () => {

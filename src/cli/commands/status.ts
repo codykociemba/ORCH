@@ -6,6 +6,7 @@
 
 import type { Command } from 'commander';
 import type { LightContainer } from '../../container.js';
+import { COUNCIL_OVERRIDE_LABEL } from '../../domain/council.js';
 import {
   statusIcon,
   priorityLabel,
@@ -39,6 +40,10 @@ export function registerStatusCommand(program: Command, container: LightContaine
 
       console.log();
       console.log(`${amber('orch')} · ${container.config.project.name} · ${mode}`);
+      const admissionOn = container.workflowConfig?.code_admission?.enabled === true;
+      const linearOn = container.workflowConfig?.linear?.enabled === true;
+      const linearReady = container.integrationService.enabled();
+      console.log(`  ${dim('workflow')}    admission ${admissionOn ? 'on' : 'off'}  linear ${linearOn ? (linearReady ? 'ready' : 'login required') : 'off'}`);
       console.log();
 
       // Status counts
@@ -65,6 +70,50 @@ export function registerStatusCommand(program: Command, container: LightContaine
           console.log(
             `  ${statusIcon('in_progress')} ${t.assignee ? agentName(t.assignee) : ''}  ${t.title.slice(0, 35).padEnd(37)}${time}  ${priorityLabel(t.priority)}`,
           );
+        }
+      }
+
+      const workflowTasks = tasks.filter((task) =>
+        task.external?.linear
+        || task.external?.github
+        || task.proof?.head_sha
+        || task.council_ref
+        || task.labels.includes(COUNCIL_OVERRIDE_LABEL)
+        || (task.reviews?.length ?? 0) > 0
+        || task.status === 'in_progress'
+        || task.status === 'review',
+      );
+      if (workflowTasks.length > 0) {
+        console.log();
+        for (const task of workflowTasks) {
+          const contract = admissionOn
+            ? await container.codeAdmissionService.getContract(task.id)
+            : null;
+          const requests = admissionOn
+            ? await container.codeAdmissionService.listRequests(task.id)
+            : [];
+          const latestRequest = requests[requests.length - 1];
+          const bits = [
+            task.external?.linear?.identifier,
+            task.external?.github?.pr_url,
+            task.proof?.verified
+              ? `proof verified @ ${(task.proof.head_sha ?? '').slice(0, 7)}`
+              : task.proof?.head_sha
+                ? `proof pending @ ${task.proof.head_sha.slice(0, 7)}`
+                : null,
+            task.reviews?.length
+              ? `review ${task.reviews[task.reviews.length - 1]!.verdict}`
+              : null,
+            task.council_ref,
+            task.labels.includes(COUNCIL_OVERRIDE_LABEL) ? COUNCIL_OVERRIDE_LABEL : null,
+            contract
+              ? `admission ${contract.code_index.index_current ? 'current' : 'stale'} ${contract.allowed_new_files.length}f/${contract.allowed_new_symbols.length}s/${contract.allowed_dependencies.length}d`
+              : null,
+            latestRequest ? `adm ${latestRequest.id} ${latestRequest.status}` : null,
+          ].filter(Boolean);
+          if (bits.length > 0) {
+            console.log(`  ${dim(task.id.padEnd(12))}${bits.join('  ')}`);
+          }
         }
       }
 

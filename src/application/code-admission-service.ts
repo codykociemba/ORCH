@@ -3,6 +3,8 @@
  */
 
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { EventBus } from './event-bus.js';
 import type { ITaskStore } from '../infrastructure/storage/interfaces.js';
@@ -34,9 +36,14 @@ import {
   pickReviewerKind,
   type IAdmissionReviewer,
 } from './admission-reviewer.js';
-import type { ImpactRisk } from '../domain/code-intelligence.js';
+import type { ImpactRisk, RepositoryIdentityInput } from '../domain/code-intelligence.js';
 
 const execFileAsync = promisify(execFile);
+
+/** Last task identity seen by preflight — dispatch calls renderPromptBlock without the worktree. */
+const workerContextByTask = new Map<string, { worktree: string; branch?: string; head_sha?: string }>();
+/** Shared-mode dirty note keyed by contract base SHA — consumed by auditDependencies. */
+const sharedDirtyNote = new Map<string, string>();
 
 export interface SubmitAdmissionInput {
   task_id: string;
@@ -69,6 +76,11 @@ export class CodeAdmissionService {
   }
 
   async preflight(task: Task): Promise<{ ok: boolean; reasons: string[] }> {
+    workerContextByTask.set(task.id, {
+      worktree: task.workspace ?? this.projectRoot,
+      branch: task.proof?.branch,
+      head_sha: task.proof?.head_sha,
+    });
     if (!this.enabled()) return { ok: true, reasons: [] };
     const reasons: string[] = [];
     const contract = await this.ensureFastPathContract(task);
@@ -252,7 +264,8 @@ export class CodeAdmissionService {
   }
 
   /**
-   * Watcher-owned: resolve pending requests that do not need an LLM.
+   * Watcher-owned: resolve pending and pending_llm requests.
+   * pending_llm retries re-run deterministic PDG / strong-hit checks first.
    */
   async processPending(): Promise<void> {
     if (!this.enabled()) return;
@@ -266,11 +279,7 @@ export class CodeAdmissionService {
         await this.store.releaseTask(request.task_id);
         continue;
       }
-      if (request.status === 'pending_llm') {
-        await this.decideWithReviewer(request, task);
-      } else {
-        await this.decideDeterministic(request, task);
-      }
+      await this.decideDeterministic(request, task);
     }
 
     const active = await this.taskStore.list();
@@ -291,6 +300,16 @@ export class CodeAdmissionService {
         passed: false,
         incomplete: true,
         violations: [{ kind: 'incomplete_audit', message: 'No modification contract' }],
+        added_files: [],
+        added_symbols: [],
+      };
+    }
+
+    if (contract.status === 'superseded') {
+      return {
+        passed: false,
+        incomplete: false,
+        violations: [{ kind: 'incomplete_audit', message: 'Superseded contract cannot authorize current work' }],
         added_files: [],
         added_symbols: [],
       };
@@ -331,7 +350,9 @@ export class CodeAdmissionService {
       };
     }
 
-    const addedFiles = diffs.filter((diff) => diff.status === 'added').map((diff) => normalizePath(diff.path));
+    const addedFiles = diffs
+      .filter((diff) => diff.status === 'added')
+      .map((diff) => normalizePath(diff.path));
     const approvedFiles = new Set(contract.allowed_new_files.map((file) => normalizePath(file.path)));
     const extraRequests = await this.store.listRequests({ taskId: task.id, status: 'approved' });
     for (const request of extraRequests) {
@@ -368,6 +389,16 @@ export class CodeAdmissionService {
           added_files: addedFiles,
           added_symbols: [],
         };
+      }
+      const semanticEmpty = semantic.added_symbols.length === 0
+        && semantic.modified_symbols.length === 0
+        && semantic.deleted_symbols.length === 0;
+      if (semanticEmpty && diffs.length > 0 && !(await this.confirmWorktree(worktree, task.workspace))) {
+        violations.push({
+          kind: 'wrong_worktree',
+          message: `Empty GitNexus change set is not success until git worktree, worker workspace, and task workspace agree (${worktree})`,
+        });
+        return { passed: false, incomplete: true, violations, added_files: addedFiles, added_symbols: [] };
       }
       if ((semantic.partial && audit?.fail_on_partial !== false) || (semantic.truncated && audit?.fail_on_truncated !== false) || semantic.degraded) {
         violations.push({
@@ -414,6 +445,54 @@ export class CodeAdmissionService {
           });
         }
       }
+      if (semantic.risk === 'medium' && this.workflow?.code_admission?.impact?.medium !== 'require_approval') {
+        const touched = semantic.added_symbols.length + semantic.modified_symbols.length;
+        const hasDependentTests = diffs.some((diff) => isTestPath(diff.path, this.workflow));
+        if (touched > 0 && !hasDependentTests) {
+          violations.push({
+            kind: 'incomplete_audit',
+            message: 'MEDIUM impact requires tests for dependents',
+          });
+        }
+      }
+      if (semantic.risk === 'critical') {
+        const independent = (task.reviews ?? []).some((review) => (
+          review.verdict === 'approve'
+          && (review.reviewer_type === 'cursor' || review.reviewer_type === 'codex' || review.reviewer_type === 'claude')
+        ));
+        if (!independent) {
+          violations.push({
+            kind: 'unapproved_symbol',
+            message: 'CRITICAL impact requires independent review (cursor, Codex, or Claude)',
+          });
+        }
+      }
+
+      const deletedSymbols = semantic.deleted_symbols.map((symbol) => symbol.name);
+      const processes = [...semantic.processes];
+      if (processes.length > 0 && (semantic.risk === 'high' || semantic.risk === 'critical')) {
+        const last = violations[violations.length - 1];
+        if (last && (last.kind === 'unapproved_symbol' || last.kind === 'incomplete_audit')) {
+          last.message = `${last.message} (processes: ${processes.join(', ')})`;
+        }
+      }
+
+      const passed = violations.length === 0;
+      this.eventBus.emit({
+        type: 'code_admission:audit_completed',
+        taskId: task.id,
+        passed,
+        violations: violations.map((item) => item.message),
+      });
+      return {
+        passed,
+        incomplete: false,
+        violations,
+        added_files: addedFiles,
+        added_symbols: addedSymbols,
+        deleted_symbols: deletedSymbols,
+        processes,
+      };
     }
 
     const passed = violations.length === 0;
@@ -426,17 +505,36 @@ export class CodeAdmissionService {
     return { passed, incomplete: false, violations, added_files: addedFiles, added_symbols: addedSymbols };
   }
 
-  renderPromptBlock(contract: ModificationContract): string {
+  renderPromptBlock(
+    contract: ModificationContract,
+    workspacePath?: string,
+    identity?: { branch?: string; head_sha?: string },
+  ): string {
     const files = contract.allowed_new_files.map((file) => file.path).join(', ') || 'none';
     const symbols = contract.allowed_new_symbols.map((symbol) => symbol.name).join(', ') || 'none';
     const edits = contract.allowed_existing_edits.map((edit) => `${edit.path} :: ${edit.symbol}`).join(', ') || 'scope only';
+    const cached = workerContextByTask.get(contract.task_id);
+    const worktree = workspacePath ?? cached?.worktree ?? this.projectRoot;
+    const branch = identity?.branch ?? cached?.branch ?? 'unknown';
+    const headSha = identity?.head_sha ?? cached?.head_sha ?? contract.base_sha;
     return [
       '## Modification Contract (enforced at merge)',
       `Source: ${contract.source}`,
       `Existing edits: ${edits}`,
       `Approved new files: ${files}`,
       `Approved new symbols: ${symbols}`,
-      'New files/exported symbols/dependencies require `orch admission request`.',
+      '## Worker code context',
+      `repository_root: ${this.projectRoot}`,
+      `worktree_path: ${worktree}`,
+      `branch: ${branch}`,
+      `base_sha: ${contract.base_sha}`,
+      `head_sha: ${headSha}`,
+      `gitnexus.repo: ${contract.code_index.repo}`,
+      `gitnexus.worktree: ${worktree}`,
+      `gitnexus.index_commit: ${contract.code_index.index_commit || 'unknown'}`,
+      `gitnexus.index_current: ${contract.code_index.index_current ? 'yes' : 'no'}`,
+      'Pass this worktree to every GitNexus detect_changes call. A zero from the wrong checkout is not success.',
+      'New files/exported symbols/dependencies require `orch admission request new-file|new-symbol|dependency`.',
       'The watcher decides. Strong GitNexus/ledger hits auto-reject. Do not self-approve.',
     ].join('\n');
   }
@@ -470,6 +568,43 @@ export class CodeAdmissionService {
       const reserved = await this.store.findReservation('dependency', { package: request.proposed.package });
       if (reserved && reserved.task_id !== task.id) {
         return this.redirect(request, reserved.task_id, reserved.package ?? request.proposed.package, undefined, task);
+      }
+    }
+
+    const hay = [
+      request.type,
+      request.need,
+      request.proposed.name,
+      request.proposed.path,
+      request.proposed.package,
+      request.why_existing_file_is_not_enough,
+      ...(request.gitnexus_searches ?? []),
+    ].filter(Boolean).join(' ');
+    const sensitive = request.type === 'high_risk_edit'
+      || /\b(security|auth|payments?|concurrency|dataflow(?:-sensitive)?)\b/i.test(hay);
+    if (sensitive && this.intelligence) {
+      const run = this.intelligence.analyze;
+      if (typeof run !== 'function') {
+        return this.finish(request, {
+          status: 'rejected',
+          decided_at: new Date().toISOString(),
+          decided_by: 'gitnexus',
+          reason: 'PDG required for security/auth/payments/concurrency/dataflow-sensitive admission',
+        });
+      }
+      try {
+        await run({
+          repository_root: this.projectRoot,
+          worktree_path: task.workspace ?? this.projectRoot,
+          pdg: true,
+        } as RepositoryIdentityInput);
+      } catch {
+        return this.finish(request, {
+          status: 'rejected',
+          decided_at: new Date().toISOString(),
+          decided_by: 'gitnexus',
+          reason: 'PDG required for security/auth/payments/concurrency/dataflow-sensitive admission — gitnexus analyze --pdg failed',
+        });
       }
     }
 
@@ -699,6 +834,26 @@ export class CodeAdmissionService {
     extraRequests: AdmissionRequest[],
     violations: AdmissionAuditViolation[],
   ): void {
+    const dirtyMsg = sharedDirtyNote.get(contract.base_sha);
+    if (dirtyMsg) {
+      violations.push({ kind: 'incomplete_audit', message: dirtyMsg });
+      sharedDirtyNote.delete(contract.base_sha);
+    }
+    auditConventionDiffs(this.workflow, diffs, violations);
+    if ((this.workflow as { conventions?: { enabled?: boolean } } | null)?.conventions?.enabled === true) {
+      for (const diff of diffs) {
+        if (diff.status === 'deleted' || diff.status === 'renamed') continue;
+        for (const line of diff.addedLines) {
+          if (!/@(param|returns?|example|typedef|template|throws|deprecated|see)\b/.test(line)) continue;
+          violations.push({
+            kind: 'unapproved_file',
+            message: `conventions: ${diff.path} added function JSDoc`,
+            path: diff.path,
+          });
+          break;
+        }
+      }
+    }
     const approved = new Set(contract.allowed_dependencies.map((dep) => dep.package.toLowerCase()));
     for (const request of extraRequests) {
       if (request.type === 'new_dependency' && request.proposed.package) {
@@ -730,6 +885,26 @@ export class CodeAdmissionService {
     return request;
   }
 
+  /** Spec addendum §11.3: a wrong-worktree zero is not success. */
+  private async confirmWorktree(worktree: string, taskWorkspace?: string): Promise<boolean> {
+    if (taskWorkspace && normalizePath(worktree) !== normalizePath(taskWorkspace)) return false;
+    if (!taskWorkspace && normalizePath(worktree) === normalizePath(this.projectRoot)) return true;
+    try {
+      const { stdout: toplevel } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: worktree });
+      const root = toplevel.trim();
+      if (!root) return false;
+      const { stdout: listed } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: this.projectRoot });
+      const worktrees = listed
+        .split('\n')
+        .filter((line) => line.startsWith('worktree '))
+        .map((line) => normalizePath(line.slice('worktree '.length).trim()));
+      const expected = new Set([normalizePath(worktree), normalizePath(root)]);
+      return worktrees.some((entry) => expected.has(entry));
+    } catch {
+      return false;
+    }
+  }
+
   private async gitHead(): Promise<string> {
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: this.projectRoot });
@@ -743,16 +918,74 @@ export class CodeAdmissionService {
     if (!baseSha || baseSha === 'unknown') return [];
     try {
       const { stdout } = await execFileAsync('git', ['diff', '--name-status', baseSha], { cwd: this.projectRoot });
-      return stdout
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          const [code, ...rest] = line.split(/\s+/);
-          const path = rest[rest.length - 1] ?? '';
-          const status = code === 'A' ? 'added' : code === 'D' ? 'deleted' : code === 'R' ? 'renamed' : 'modified';
-          return { path, status, addedLines: [] };
+      const rows = stdout.trim().split('\n').filter(Boolean);
+      const diffs: ChangedFileDiff[] = [];
+      for (const line of rows) {
+        const [code, ...rest] = line.split(/\s+/);
+        const filePath = rest[rest.length - 1] ?? '';
+        const status = code === 'A' ? 'added' : code === 'D' ? 'deleted' : code === 'R' ? 'renamed' : 'modified';
+        let addedLines: string[] = [];
+        if (status !== 'deleted' && filePath) {
+          try {
+            const { stdout: patch } = await execFileAsync(
+              'git',
+              ['diff', '-U0', baseSha, '--', filePath],
+              { cwd: this.projectRoot },
+            );
+            addedLines = patch
+              .split('\n')
+              .filter((row) => row.startsWith('+') && !row.startsWith('+++'))
+              .map((row) => row.slice(1));
+          } catch {
+            addedLines = [];
+          }
+        }
+        diffs.push({ path: filePath, status, addedLines });
+      }
+      try {
+        const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain', '-uall'], {
+          cwd: this.projectRoot,
         });
+        const seen = new Set(diffs.map((diff) => normalizePath(diff.path)));
+        for (const row of porcelain.split('\n')) {
+          if (!row.startsWith('??')) continue;
+          const untracked = row.slice(3).trim().replace(/^"|"$/g, '').split(' -> ').pop() ?? '';
+          if (!untracked || seen.has(normalizePath(untracked))) continue;
+          seen.add(normalizePath(untracked));
+          let lines: string[] = [];
+          try {
+            lines = (await readFile(join(this.projectRoot, untracked), 'utf8')).split('\n');
+          } catch {
+            lines = [];
+          }
+          diffs.push({ path: untracked, status: 'added', addedLines: lines });
+        }
+      } catch {
+        // Untracked files stay invisible if porcelain fails; name-status diffs still audit.
+      }
+      sharedDirtyNote.delete(baseSha);
+      try {
+        const live = (await this.taskStore.list()).filter((task) => !isTerminal(task.status));
+        const shared: Task[] = [];
+        for (const task of live) {
+          const owned = await this.store.loadContract(task.id);
+          if (!owned || owned.base_sha !== baseSha) continue;
+          const isShared = task.workspace_mode === 'shared' || (!task.workspace && !task.proof?.branch);
+          if (isShared) shared.push(task);
+        }
+        if (shared.length > 1 && diffs.length > 0) {
+          sharedDirtyNote.set(baseSha, 'shared workspace is dirty; cannot attribute convention violations');
+        } else if (shared.length === 1) {
+          const attributed = new Set((shared[0]!.proof?.files_changed ?? []).map((file) => normalizePath(file)));
+          const dirty = diffs.map((diff) => normalizePath(diff.path)).filter(Boolean);
+          if (dirty.length > 0 && (attributed.size === 0 || dirty.some((file) => !attributed.has(file)))) {
+            sharedDirtyNote.set(baseSha, 'shared workspace is dirty; cannot attribute convention violations');
+          }
+        }
+      } catch {
+        // Attribution is best-effort; git diffs still audit.
+      }
+      return diffs;
     } catch {
       return [];
     }
@@ -778,6 +1011,257 @@ function sameProposed(
     (proposed.name ?? '') === (request.proposed.name ?? '') &&
     (proposed.package ?? '') === (request.proposed.package ?? '')
   );
+}
+
+/** Spec §3.4: conventions fail the admission audit (and therefore merge-back) when enabled. */
+function auditConventionDiffs(
+  workflow: WorkflowConfig | null,
+  diffs: ChangedFileDiff[],
+  violations: AdmissionAuditViolation[],
+): void {
+  const rules = (workflow as { conventions?: {
+    enabled?: boolean;
+    organization?: {
+      no_parallel_utils?: boolean;
+      allowed_new_file_roots?: string[];
+      forbidden_new_file_globs?: string[];
+      max_new_files_per_task?: number;
+    };
+    comments?: {
+      header_max_lines?: number;
+      header_min_lines?: number;
+      allowed_inline_patterns?: string[];
+      extensions?: string[];
+    };
+  } } | null)?.conventions;
+  if (rules?.enabled !== true) return;
+
+  const forbidden = rules.organization?.forbidden_new_file_globs ?? ['**/utils/**', '**/helpers/**', '**/lib/misc/**'];
+  const roots = rules.organization?.allowed_new_file_roots ?? ['src/', 'test/', 'docs/'];
+  const maxNew = rules.organization?.max_new_files_per_task ?? 8;
+  const extensions = rules.comments?.extensions ?? ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+  const allowed = (rules.comments?.allowed_inline_patterns ?? [
+    '^\\s*//\\s*eslint-disable',
+    '^\\s*//\\s*@ts-expect-error',
+    '^\\s*//\\s*@ts-ignore',
+    '^\\s*/\\*\\s*c8 ignore',
+  ]).map((item) => new RegExp(item));
+  const headerMax = rules.comments?.header_max_lines ?? 4;
+  const headerMin = rules.comments?.header_min_lines ?? 1;
+  const added = diffs.filter((diff) => diff.status === 'added');
+  if (added.length > maxNew) {
+    violations.push({
+      kind: 'unapproved_file',
+      message: `conventions: max_new_files_per_task ${maxNew} exceeded (${added.length})`,
+    });
+  }
+  for (const diff of added) {
+    const filePath = normalizePath(diff.path);
+    if (rules.organization?.no_parallel_utils !== false && forbidden.some((glob) => matchConventionGlob(filePath, glob))) {
+      violations.push({
+        kind: 'unapproved_file',
+        message: `conventions: no_parallel_utils forbids new file ${filePath}`,
+        path: filePath,
+      });
+    }
+    if (roots.length > 0 && !roots.some((root) => filePath.startsWith(root.replace(/\\/g, '/')))) {
+      violations.push({
+        kind: 'unapproved_file',
+        message: `conventions: ${filePath} is outside allowed roots ${roots.join(', ')}`,
+        path: filePath,
+      });
+    }
+  }
+  for (const diff of diffs) {
+    const filePath = normalizePath(diff.path);
+    const ext = filePath.slice(filePath.lastIndexOf('.'));
+    if (!extensions.includes(ext) || diff.status === 'deleted' || diff.status === 'renamed') continue;
+    if (diff.status === 'added') {
+      const content = diff.addedLines.join('\n');
+      const comments = collectSourceComments(content);
+      if (comments.length === 0) {
+        violations.push({
+          kind: 'unapproved_file',
+          message: `conventions: ${filePath} is missing a 1–${headerMax} line file header`,
+          path: filePath,
+        });
+        continue;
+      }
+      const headerLines = comments[0]!.text.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (headerLines.length < headerMin || headerLines.length > headerMax) {
+        violations.push({
+          kind: 'unapproved_file',
+          message: `conventions: ${filePath} header must be ${headerMin}–${headerMax} lines`,
+          path: filePath,
+        });
+      }
+      for (const comment of comments.slice(1)) {
+        if (allowed.some((pattern) => pattern.test(comment.raw))) continue;
+        violations.push({
+          kind: 'unapproved_file',
+          message: `conventions: ${filePath} has an inline comment after the file header`,
+          path: filePath,
+        });
+        break;
+      }
+    } else {
+      for (const line of diff.addedLines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*')) continue;
+        if (allowed.some((pattern) => pattern.test(line))) continue;
+        violations.push({
+          kind: 'unapproved_file',
+          message: `conventions: ${filePath} added an inline comment`,
+          path: filePath,
+        });
+        break;
+      }
+    }
+  }
+}
+
+function matchConventionGlob(filePath: string, glob: string): boolean {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*');
+  return new RegExp(escaped).test(filePath);
+}
+
+function collectSourceComments(source: string): Array<{ text: string; raw: string }> {
+  const comments: Array<{ text: string; raw: string }> = [];
+  let i = 0;
+  if (source.startsWith('#!')) {
+    const nl = source.indexOf('\n');
+    i = nl === -1 ? source.length : nl + 1;
+  }
+  while (i < source.length && (source[i] === ' ' || source[i] === '\t' || source[i] === '\n' || source[i] === '\r')) i += 1;
+  if (source.startsWith("'use strict'", i) || source.startsWith('"use strict"', i)) {
+    i += 12;
+    if (source[i] === ';') i += 1;
+  }
+  let quote: '"' | "'" | null = null;
+  let inTemplate = false;
+  let escaped = false;
+  let interp = 0;
+  let prev = '';
+  while (i < source.length) {
+    const ch = source[i]!;
+    const next = source[i + 1];
+    if (inTemplate && interp === 0 && quote === null) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '$' && next === '{') interp = 1;
+      else if (ch === '`') inTemplate = false;
+      i += interp === 1 ? 2 : 1;
+      continue;
+    }
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (inTemplate && interp > 0) {
+      if (ch === '{') {
+        interp += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === '}') {
+        interp -= 1;
+        i += 1;
+        continue;
+      }
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '`') {
+      inTemplate = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      const end = source.indexOf('\n', i);
+      const raw = source.slice(i, end === -1 ? source.length : end);
+      comments.push({ text: raw.replace(/^\/\/\s?/, ''), raw });
+      i = end === -1 ? source.length : end;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      const raw = source.slice(i, end === -1 ? source.length : end + 2);
+      comments.push({ text: raw.replace(/^\/\*+/, '').replace(/\*+\/$/, '').trim(), raw });
+      i = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (ch === '/' && next !== '/' && next !== '*') {
+      const regexStart = !prev
+        || '([{,;=!:?&|~^%<>;+\n'.includes(prev)
+        || prev === 'return'
+        || prev === 'typeof'
+        || prev === 'case'
+        || prev === 'throw'
+        || prev === 'void'
+        || prev === 'new'
+        || prev === 'delete'
+        || prev === 'yield'
+        || prev === 'await'
+        || prev === 'else'
+        || prev === 'in'
+        || prev === 'of';
+      if (regexStart) {
+        i += 1;
+        let reEsc = false;
+        let inClass = false;
+        while (i < source.length) {
+          const rch = source[i]!;
+          if (reEsc) {
+            reEsc = false;
+            i += 1;
+            continue;
+          }
+          if (rch === '\\') {
+            reEsc = true;
+            i += 1;
+            continue;
+          }
+          if (rch === '[' && !inClass) {
+            inClass = true;
+            i += 1;
+            continue;
+          }
+          if (rch === ']' && inClass) {
+            inClass = false;
+            i += 1;
+            continue;
+          }
+          if (rch === '/' && !inClass) {
+            i += 1;
+            break;
+          }
+          if (rch === '\n') break;
+          i += 1;
+        }
+        while (i < source.length && /[a-z]/i.test(source[i]!)) i += 1;
+        prev = '/';
+        continue;
+      }
+    }
+    if (!/\s/.test(ch)) {
+      if (/[A-Za-z_$]/.test(ch)) {
+        let j = i;
+        while (j < source.length && /[A-Za-z0-9_$]/.test(source[j]!)) j += 1;
+        prev = source.slice(i, j);
+        i = j;
+        continue;
+      }
+      prev = ch;
+    }
+    i += 1;
+  }
+  return comments;
 }
 
 function isTestPath(path: string, workflow: WorkflowConfig | null): boolean {

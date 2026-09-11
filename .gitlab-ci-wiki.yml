@@ -11,13 +11,64 @@ wiki-preview:
     - npm i -g gitnexus
     - export GITNEXUS_LBUG_BUFFER_POOL_SIZE="${GITNEXUS_LBUG_BUFFER_POOL_SIZE:-2147483648}"
     - gitnexus analyze --index-only
+    - gitnexus status --json > /tmp/gitnexus-status.json || true
     - |
       if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
         echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY"
         exit 0
       fi
-      gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+      npm ci
+      npx tsx src/bin/cli.ts wiki generate
     - echo "Do not publish the project wiki from an MR."
+    - |
+      PAGES=0
+      if [ -d .gitnexus/wiki ]; then
+        PAGES=$(find .gitnexus/wiki -name '*.md' | wc -l | tr -d ' ')
+      fi
+      INDEX_STATUS=$(python -c 'import json; print(json.load(open("/tmp/gitnexus-status.json")).get("status","unknown"))' 2>/dev/null || echo unknown)
+      if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
+        STATUS="SKIPPED"
+      elif [ "$INDEX_STATUS" != "current" ]; then
+        STATUS="FAIL"
+      elif [ "$PAGES" -gt 0 ]; then
+        STATUS="PASS"
+      else
+        STATUS="FAIL"
+      fi
+      SHA=$(echo "$CI_COMMIT_SHA" | cut -c1-7)
+      BODY=$(printf '%s\n' \
+        '<!-- orch-wiki-preview -->' \
+        'Wiki Preview' \
+        '────────────────────────────' \
+        "GitNexus index: ${INDEX_STATUS}" \
+        "Source SHA: ${SHA}" \
+        "Pages generated/updated: ${PAGES}" \
+        "Status: ${STATUS}" \
+        'Artifact: gitnexus wiki (MR artifact)')
+      if [ -n "$CI_MERGE_REQUEST_IID" ] && [ -n "$GITLAB_TOKEN" ]; then
+        NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+        NOTE_ID=$(curl --silent --show-error --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "$NOTES_URL" \
+          | python -c 'import json,sys; notes=json.load(sys.stdin); print(next((str(n["id"]) for n in notes if "orch-wiki-preview" in (n.get("body") or "")), ""), end="")' \
+          || true)
+        PAYLOAD=$(printf '%s' "$BODY" | python -c 'import json,sys; print(json.dumps({"body": sys.stdin.read()}))')
+        if [ -n "$NOTE_ID" ]; then
+          curl --silent --show-error --request PUT \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "${NOTES_URL}/${NOTE_ID}" >/dev/null || true
+        else
+          curl --silent --show-error --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "$NOTES_URL" >/dev/null || true
+        fi
+      fi
+      if [ "$STATUS" = "FAIL" ]; then
+        echo "Wiki preview required check failed (trusted MR generated 0 pages)."
+        exit 1
+      fi
   artifacts:
     when: always
     paths:
@@ -38,6 +89,6 @@ wiki-publish:
         echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY"
         exit 0
       fi
-      gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
-    - npm ci
+      npm ci
+      npx tsx src/bin/cli.ts wiki generate
     - npx tsx src/bin/cli.ts wiki publish

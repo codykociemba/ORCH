@@ -295,5 +295,50 @@ describe('logs command', () => {
         program.parseAsync(['logs', '--follow'], { from: 'user' }),
       ).resolves.not.toThrow();
     });
+
+    it('prints admission audit and wiki bootstrap events', async () => {
+      let handler: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
+      let fireSigint: () => void = () => {};
+      container = makeContainer({
+        eventBus: {
+          onAny: vi.fn((h: (event: { type: string; [key: string]: unknown }) => void) => {
+            handler = h;
+            return vi.fn();
+          }),
+        } as any,
+      });
+      program = new Command();
+      program.exitOverride();
+      registerLogsCommand(program, container);
+      vi.spyOn(process, 'once').mockImplementation(
+        (event: string | symbol, cb: (...args: unknown[]) => void) => {
+          if (event === 'SIGINT') fireSigint = () => cb();
+          return process;
+        },
+      );
+
+      const pending = program.parseAsync(['logs', '--follow'], { from: 'user' });
+      await Promise.resolve();
+      handler?.({
+        type: 'code_admission:audit_completed',
+        taskId: 'tsk_1',
+        passed: true,
+        violations: [],
+        deleted_symbols: ['oldHelper'],
+        processes: ['RetryFlow'],
+      });
+      handler?.({ type: 'wiki:bootstrap_required', provider: 'github' });
+
+      const output = (console.log as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0] ?? ''))
+        .join('\n');
+      expect(output).toContain('Admission audit');
+      expect(output).toContain('deleted:oldHelper');
+      expect(output).toContain('processes:RetryFlow');
+      expect(output).toContain('Wiki first-page bootstrap required');
+
+      fireSigint();
+      await pending;
+    });
   });
 });

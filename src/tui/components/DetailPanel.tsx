@@ -88,6 +88,26 @@ export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskT
   const hasDescription = !!task.description?.trim();
   const hasSummary = !!task.proof?.agent_summary;
   const hasFiles = (task.proof?.files_changed?.length ?? 0) > 0;
+  const syncProblem = task.feedback
+    ?.split('\n')
+    .find((line) => /Linear login required|Linear issue was not created|outbox|integration sync/i.test(line));
+  const deletedSymbols = task.feedback
+    ?.split('\n')
+    .find((line) => /^admission: deleted symbols:/i.test(line))
+    ?.replace(/^admission: deleted symbols:\s*/i, '')
+    .trim();
+  const affectedProcesses = task.feedback
+    ?.split('\n')
+    .find((line) => /^admission: processes:/i.test(line))
+    ?.replace(/^admission: processes:\s*/i, '')
+    .trim();
+  const lastAudit = admission?.lastAudit
+    ?? (task.feedback && /CODE ADMISSION|conventions:|shared workspace is dirty|Unapproved new /i.test(task.feedback)
+      ? 'fail' as const
+      : undefined)
+    ?? (task.proof?.verified ? 'pass' as const : undefined);
+  const auditViolations = admission?.violations
+    ?? (lastAudit === 'fail' && task.feedback ? task.feedback.split('\n').filter(Boolean).length : 0);
   const hasLogs = (taskLogs?.length ?? 0) > 0;
   const hasAttachments = (task.attachments?.length ?? 0) > 0;
 
@@ -190,16 +210,30 @@ export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskT
           </Text>
         </Box>
       </Box>
-      {(task.external?.linear?.identifier || task.council_ref || task.plan_id || task.proof?.head_sha) && (
-        <Box>
-          <Box width={col1Width}>
-            <Text color={tuiColors.dim}>  linear    </Text>
-            <Text>{task.external?.linear?.identifier ?? '\u2014'}</Text>
-          </Box>
+      <Box>
+        <Box width={col1Width}>
+          <Text color={tuiColors.dim}>  linear    </Text>
+          <Text color={task.external?.linear?.identifier ? undefined : tuiColors.red}>
+            {task.external?.linear?.identifier ?? 'missing — orch integration login'}
+          </Text>
+        </Box>
+        {(task.council_ref || task.plan_id) && (
           <Box>
             <Text color={tuiColors.dim}>  plan      </Text>
             <Text dimColor>{task.plan_unit_id ?? task.plan_id ?? task.council_ref ?? '\u2014'}</Text>
           </Box>
+        )}
+      </Box>
+      {task.workspace && (
+        <Box>
+          <Text color={tuiColors.dim}>  worktree  </Text>
+          <Text dimColor>{task.workspace}</Text>
+        </Box>
+      )}
+      {task.external?.github?.pr_url && (
+        <Box>
+          <Text color={tuiColors.dim}>  pr        </Text>
+          <Text dimColor>{task.external.github.pr_url}</Text>
         </Box>
       )}
       {task.proof?.head_sha && (
@@ -208,11 +242,29 @@ export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskT
           <Text dimColor>{task.proof.verified ? 'verified' : 'pending'} @ {task.proof.head_sha.slice(0, 7)}</Text>
         </Box>
       )}
+      {syncProblem && (
+        <Box>
+          <Text color={tuiColors.dim}>  sync      </Text>
+          <Text color={tuiColors.red}>{syncProblem}</Text>
+        </Box>
+      )}
+      {task.reviews && task.reviews.length > 0 && (
+        <Box>
+          <Text color={tuiColors.dim}>  review    </Text>
+          <Text dimColor>
+            {task.reviews[task.reviews.length - 1]!.verdict}
+            {' @ '}
+            {task.reviews[task.reviews.length - 1]!.commit_sha.trim().slice(0, 7) || 'missing'}
+          </Text>
+        </Box>
+      )}
 
-      {admission && (
+      {(admission || lastAudit || deletedSymbols || affectedProcesses) && (
         <>
           <Text>{' '}</Text>
           <SectionDivider label="code admission" width={width} color={tuiColors.dim} />
+          {admission && (
+            <>
           <Text>
             <Text color={tuiColors.dim}>  GitNexus  </Text>
             <Text>{admission.indexLabel}</Text>
@@ -223,18 +275,32 @@ export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskT
               edits {admission.existingEdits}  files {admission.newFiles}  symbols {admission.newSymbols}  deps {admission.dependencies}
             </Text>
           </Text>
-          {admission.lastAudit && (
+            </>
+          )}
+          {lastAudit && (
             <Text>
               <Text color={tuiColors.dim}>  Audit     </Text>
-              <Text color={admission.lastAudit === 'pass' ? tuiColors.green : tuiColors.red}>
-                {admission.lastAudit.toUpperCase()}
+              <Text color={lastAudit === 'pass' ? tuiColors.green : tuiColors.red}>
+                {lastAudit.toUpperCase()}
               </Text>
-              {admission.violations > 0 && (
-                <Text color={tuiColors.dim}>  {admission.violations} violation{admission.violations === 1 ? '' : 's'}</Text>
+              {auditViolations > 0 && (
+                <Text color={tuiColors.dim}>  {auditViolations} violation{auditViolations === 1 ? '' : 's'}</Text>
               )}
             </Text>
           )}
-          {admission.requests.slice(0, 4).map((request) => (
+          {deletedSymbols && (
+            <Text>
+              <Text color={tuiColors.dim}>  Deleted   </Text>
+              <Text dimColor>{deletedSymbols}</Text>
+            </Text>
+          )}
+          {affectedProcesses && (
+            <Text>
+              <Text color={tuiColors.dim}>  Processes </Text>
+              <Text dimColor>{affectedProcesses}</Text>
+            </Text>
+          )}
+          {admission?.requests.slice(0, 4).map((request) => (
             <Text key={request.id} dimColor>
               {'  '}{request.id}  {request.type}  {request.status}
             </Text>

@@ -131,6 +131,121 @@ export class StructuredLogger {
       case 'task:cascade_failed':
         return { ts, level: 'warn', event: event.type, taskId: event.taskId, failedDependencyId: event.failedDependencyId, reason: event.reason };
 
+      case 'integration:linear_issue_created':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, identifier: event.identifier };
+
+      case 'integration:linear_issue_updated':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, identifier: event.identifier, from: event.from, to: event.to };
+
+      case 'integration:linear_comment_published':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, kind: event.kind };
+
+      case 'integration:github_pr_linked':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, url: event.url, number: event.number };
+
+      case 'github:pr_created':
+      case 'github:pr_updated':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, url: event.url, number: event.number };
+
+      case 'github:pr_reviewed':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, verdict: event.verdict, sha: event.sha };
+
+      case 'github:pr_merged':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, sha: event.sha };
+
+      case 'integration:proof_published':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, headSha: event.headSha };
+
+      case 'integration:sync_retry':
+        return { ts, level: 'warn', event: event.type, provider: event.provider, taskId: event.taskId };
+
+      case 'integration:sync_failed':
+        return { ts, level: 'error', event: event.type, provider: event.provider, taskId: event.taskId, error: event.error };
+
+      case 'planning:started':
+        return { ts, level: 'info', event: event.type, planId: event.planId, title: event.title };
+
+      case 'planning:validated':
+        return { ts, level: event.ok ? 'info' : 'warn', event: event.type, planId: event.planId, ok: event.ok };
+
+      case 'planning:council_started':
+        return { ts, level: 'info', event: event.type, planId: event.planId };
+
+      case 'planning:council_member_completed':
+        return { ts, level: 'info', event: event.type, planId: event.planId, adapter: event.adapter, verdict: event.verdict };
+
+      case 'planning:council_completed':
+        return { ts, level: 'info', event: event.type, planId: event.planId, councilId: event.councilId, verdict: event.verdict };
+
+      case 'planning:council_blocked':
+        return { ts, level: 'warn', event: event.type, planId: event.planId, reason: event.reason };
+
+      case 'planning:council_overridden':
+        return { ts, level: 'warn', event: event.type, planId: event.planId, reason: event.reason, taskCount: event.taskCount };
+
+      case 'learning:created':
+        return { ts, level: 'info', event: event.type, goalId: event.goalId, eligible: event.eligible };
+
+      case 'learning:refreshed':
+        return { ts, level: 'info', event: event.type, goalId: event.goalId };
+
+      case 'code_admission:contract_created':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId };
+
+      case 'code_admission:audit_started':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId };
+
+      case 'code_admission:request_created':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId, requestId: event.requestId, requestType: event.requestType };
+
+      case 'code_admission:request_decided':
+        return { ts, level: event.approved ? 'info' : 'warn', event: event.type, taskId: event.taskId, requestId: event.requestId, approved: event.approved };
+
+      case 'code_admission:audit_completed':
+        return {
+          ts,
+          level: event.passed ? 'info' : 'warn',
+          event: event.type,
+          taskId: event.taskId,
+          passed: event.passed,
+          violations: event.violations,
+          deleted_symbols: event.deleted_symbols,
+          processes: event.processes,
+        };
+
+      case 'workspace:conventions_passed':
+        return { ts, level: 'info', event: event.type, taskId: event.taskId };
+
+      case 'workspace:conventions_failed':
+        return { ts, level: 'warn', event: event.type, taskId: event.taskId, violations: event.violations };
+
+      case 'code_intelligence:index_stale':
+        return { ts, level: 'warn', event: event.type, repo: event.repo, taskId: event.taskId };
+
+      case 'code_intelligence:index_refreshed':
+        return { ts, level: 'info', event: event.type, repo: event.repo, taskId: event.taskId };
+
+      case 'wiki:generation_started':
+        return { ts, level: 'info', event: event.type, mode: event.mode, sha: event.sha };
+
+      case 'wiki:generation_completed':
+        return { ts, level: 'info', event: event.type, mode: event.mode, sha: event.sha, pages: event.pages };
+
+      case 'wiki:publish_started':
+        return { ts, level: 'info', event: event.type, provider: event.provider, sha: event.sha };
+
+      case 'wiki:publish_blocked':
+        return { ts, level: 'warn', event: event.type, branch: event.branch, defaultBranch: event.defaultBranch };
+
+      case 'wiki:published':
+        return { ts, level: 'info', event: event.type, host: event.host, branch: event.branch, pages: event.pages };
+
+      case 'wiki:bootstrap_required':
+        return { ts, level: 'warn', event: event.type, provider: event.provider };
+
+      case 'wiki:failed':
+        return { ts, level: 'error', event: event.type, stage: event.stage, error: event.error };
+
       default:
         return null;
     }

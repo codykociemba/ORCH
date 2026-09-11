@@ -54,22 +54,29 @@ describe('templateToAgentInput', () => {
 
   it('filters MCP skills for pi adapter', () => {
     const input = templateToAgentInput(baseTemplate, 'pi');
-    expect(input.skills).toEqual(['review', 'careful']);
+    expect(input.skills).toEqual(['review', 'careful', 'workflow', 'code-admission']);
   });
 
   it('keeps all skills for claude adapter', () => {
     const input = templateToAgentInput(baseTemplate, 'claude');
-    expect(input.skills).toEqual(['review', 'careful', 'feature-dev:feature-dev', 'testing-suite:generate-tests']);
+    expect(input.skills).toEqual([
+      'review',
+      'careful',
+      'feature-dev:feature-dev',
+      'testing-suite:generate-tests',
+      'workflow',
+      'code-admission',
+    ]);
   });
 
   it('filters MCP skills for non-claude adapters', () => {
     const input = templateToAgentInput(baseTemplate, 'opencode');
-    expect(input.skills).toEqual(['review', 'careful']);
+    expect(input.skills).toEqual(['review', 'careful', 'workflow', 'code-admission']);
   });
 
   it('filters MCP skills for codex adapter', () => {
     const input = templateToAgentInput(baseTemplate, 'codex');
-    expect(input.skills).toEqual(['review', 'careful']);
+    expect(input.skills).toEqual(['review', 'careful', 'workflow', 'code-admission']);
   });
 
   it('handles capable tier', () => {
