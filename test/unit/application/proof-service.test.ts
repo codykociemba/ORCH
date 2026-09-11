@@ -57,4 +57,24 @@ describe('ProofService', () => {
     expect(evidence.verified).toBe(false);
     expect(service.renderGitHub(evidence)).toContain('FAIL');
   });
+
+  it('renders wiki bootstrap in GitHub and Linear proof', () => {
+    const evidence = service.build({
+      task: makeTask(),
+      headSha: 'abc123',
+      wiki: {
+        enabled: true,
+        provider: 'github',
+        mode: 'pr-preview',
+        source_sha: 'abc123',
+        index_current: true,
+        status: 'bootstrap_required',
+        pages_generated: 4,
+      },
+    });
+    const github = service.renderGitHub(evidence);
+    expect(github).toContain('one-time wiki bootstrap required');
+    expect(github).toContain('preview only');
+    expect(service.renderLinear(evidence)).toContain('Wiki: bootstrap_required');
+  });
 });

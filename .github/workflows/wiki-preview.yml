@@ -3,7 +3,7 @@ name: wiki-preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -11,16 +11,41 @@ permissions:
 
 jobs:
   preview:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Preview only
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install GitNexus
+        run: npm i -g gitnexus
+
+      - name: Index repository
+        env:
+          GITNEXUS_LBUG_BUFFER_POOL_SIZE: '2147483648'
+        run: gitnexus analyze --index-only
+
+      - name: Generate wiki preview
+        env:
+          GITNEXUS_WIKI_API_KEY: ${{ secrets.GITNEXUS_WIKI_API_KEY }}
+          GITNEXUS_WIKI_PROVIDER: ${{ vars.GITNEXUS_WIKI_PROVIDER }}
         run: |
-          if command -v gitnexus >/dev/null 2>&1; then
-            gitnexus wiki generate
-            gitnexus wiki preview
-          else
-            echo "gitnexus not installed on this runner — preview skipped (do not publish)."
+          echo "Do not gitnexus-publish or push a wiki from a pull request."
+          if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
+            echo "Wiki generate skipped: set repository secret GITNEXUS_WIKI_API_KEY."
+            echo "Local CLIs are not available on this runner."
+            exit 0
           fi
-          echo "Do not gitnexus wiki publish from a feature branch."
-          echo "Canonical publish belongs on default-branch CI only."
+          gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+
+      - name: Upload preview artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitnexus-wiki-preview
+          path: .gitnexus/wiki
+          if-no-files-found: ignore

@@ -12,14 +12,39 @@ jobs:
   publish:
     if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Publish GitNexus wiki from default branch
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install GitNexus
+        run: npm i -g gitnexus
+
+      - name: Index repository
+        env:
+          GITNEXUS_LBUG_BUFFER_POOL_SIZE: '2147483648'
+        run: gitnexus analyze --index-only
+
+      - name: Generate wiki
+        env:
+          GITNEXUS_WIKI_API_KEY: ${{ secrets.GITNEXUS_WIKI_API_KEY }}
+          GITNEXUS_WIKI_PROVIDER: ${{ vars.GITNEXUS_WIKI_PROVIDER }}
+        run: |
+          if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
+            echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY."
+            exit 0
+          fi
+          gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+
+      - name: Publish to provider wiki
+        env:
+          ORCH_GITHUB_WIKI_TOKEN: ${{ secrets.ORCH_GITHUB_WIKI_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Trusted default-branch context: ${GITHUB_REF_NAME}"
-          if command -v gitnexus >/dev/null 2>&1; then
-            gitnexus wiki publish
-          else
-            echo "gitnexus not installed on this runner — skip publish (install GitNexus to enable)."
-          fi
+          npm ci
+          npx tsx src/bin/cli.ts wiki publish
           echo "Do not use --force. PR previews belong in wiki-preview.yml."

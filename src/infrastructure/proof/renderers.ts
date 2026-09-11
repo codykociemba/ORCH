@@ -33,7 +33,28 @@ export function renderGitHubProof(evidence: VerificationEvidence): string {
     evidence.acceptance_criteria.length === 0 ? '- none recorded' : '',
     '',
     ...admission,
+    '',
+    ...renderWikiProof(evidence),
   ].filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n');
+}
+
+function renderWikiProof(evidence: VerificationEvidence): string[] {
+  if (!evidence.wiki) return [];
+  const wiki = evidence.wiki;
+  const lines = ['### Wiki'];
+  if (wiki.status === 'bootstrap_required') {
+    lines.push('GitNexus wiki preview: generated locally');
+    lines.push('Remote publication: one-time wiki bootstrap required');
+  } else {
+    lines.push(`GitNexus wiki: ${wiki.status}`);
+  }
+  if (wiki.source_sha) lines.push(`Source SHA: \`${wiki.source_sha}\``);
+  if (wiki.pages_generated !== undefined) lines.push(`Generated pages: ${wiki.pages_generated}`);
+  if (wiki.mode === 'pr-preview' || wiki.mode === 'local-preview') {
+    lines.push('Canonical wiki modified: no — preview only');
+  }
+  if (wiki.summary) lines.push(wiki.summary);
+  return lines;
 }
 
 export function renderLinearProof(evidence: VerificationEvidence): string {
@@ -46,5 +67,8 @@ export function renderLinearProof(evidence: VerificationEvidence): string {
       ? `Admission: ${evidence.admission.passed ? 'PASS' : 'FAIL'}`
       : '',
     ...(evidence.admission?.violations ?? []).map((item) => ` - ${item}`),
+    evidence.wiki
+      ? `Wiki: ${evidence.wiki.status}${evidence.wiki.pages_generated !== undefined ? ` (${evidence.wiki.pages_generated} pages)` : ''}`
+      : '',
   ].filter(Boolean).join('\n');
 }

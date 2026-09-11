@@ -7,6 +7,7 @@
 import type { AdapterRegistry } from '../infrastructure/adapters/registry.js';
 import type { IProcessManager } from '../infrastructure/process/process-manager.js';
 import { detectWslGitnexus, gitnexusBin, resolveGitnexusSpawn } from '../infrastructure/code-intelligence/cli-runner.js';
+import { resolveLinearApiKey } from '../infrastructure/integrations/linear/linear-issue-tracker.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
@@ -76,6 +77,9 @@ export class DoctorService {
 
     checks.push(...await this.checkGitNexusStack());
     checks.push(this.checkPonytailHint());
+    checks.push(await this.checkWiki());
+    checks.push(await this.checkGitHubCli());
+    checks.push(this.checkLinearAuth());
 
     return {
       checks,
@@ -189,11 +193,78 @@ export class DoctorService {
     return checks;
   }
 
+  private async checkWiki(): Promise<DoctorCheck> {
+    try {
+      const { WikiService } = await import('./wiki-service.js');
+      const status = await new WikiService(this.cwd).status({ probeRemote: false });
+      if (status.host === 'unknown') {
+        return {
+          name: 'wiki',
+          status: 'fail',
+          detail: 'Ambiguous or unknown wiki host — set wiki.provider in .orch/workflow.yml',
+        };
+      }
+      return {
+        name: 'wiki',
+        status: 'ok',
+        detail: `${status.host} · ${status.pages_generated} generated page(s) — run orch wiki status to probe remote bootstrap`,
+      };
+    } catch (err) {
+      return {
+        name: 'wiki',
+        status: 'fail',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   private checkPonytailHint(): DoctorCheck {
     return {
       name: 'ponytail',
       status: 'skip',
       detail: 'Optional behavioral nudge (https://github.com/DietrichGebert/ponytail). Not an enforcement gate.',
+    };
+  }
+
+  private async checkGitHubCli(): Promise<DoctorCheck> {
+    try {
+      const { stdout, stderr } = await execFileAsync('gh', ['auth', 'status'], { windowsHide: true });
+      const text = `${stdout}\n${stderr}`;
+      if (/Logged in/i.test(text)) {
+        return {
+          name: 'gh',
+          status: 'ok',
+          detail: 'GitHub CLI authenticated — proof, PRs, and wiki publish use `gh`, not GITHUB_TOKEN',
+        };
+      }
+      return {
+        name: 'gh',
+        status: 'fail',
+        detail: 'gh is installed but not logged in. Run: gh auth login',
+      };
+    } catch {
+      return {
+        name: 'gh',
+        status: 'fail',
+        detail: 'gh not found. Install GitHub CLI and run `gh auth login`',
+      };
+    }
+  }
+
+  private checkLinearAuth(): DoctorCheck {
+    if (resolveLinearApiKey()) {
+      return {
+        name: 'linear',
+        status: 'ok',
+        detail: process.env['LINEAR_API_KEY']
+          ? 'LINEAR_API_KEY is set'
+          : 'Linear credential stored (~/.orchestry/linear.token)',
+      };
+    }
+    return {
+      name: 'linear',
+      status: 'skip',
+      detail: 'Run `orch integration login` (Linear desktop / Cursor MCP cannot authenticate this CLI).',
     };
   }
 

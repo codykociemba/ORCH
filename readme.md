@@ -514,7 +514,7 @@ orch wiki status|preview|publish   # Wiki (publish = default branch)
 orch integration status            # Linear / GitHub sync
 orch plan draft "<goal>"           # Draft + route a CE plan (no dispatch)
 orch plan validate|import|reuse|verify  # Route / reuse-check a CE plan
-orch council convene <plan.json>   # Independent Claude+Codex+Grok review
+orch council convene <plan.json>   # Independent Claude+Codex+Cursor (Grok 4.6) review
 orch review ingest --task <id>     # Store Cursor/human review on HEAD SHA
 orch pr body|create <task>         # Linear magic-word PR
 orch proof publish <task>          # Linear + GitHub proof bound to SHA

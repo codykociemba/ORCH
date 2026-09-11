@@ -24,7 +24,7 @@ import type {
 } from '../../domain/code-intelligence.js';
 import type { ICliRunner, ICodeIntelligence, IMcpToolCaller } from './interface.js';
 import { ExecFileCliRunner, gitnexusBin, gitnexusCliEnv, toWslPath } from './cli-runner.js';
-import { parseGitNexusToolText } from './mcp-stdio-client.js';
+import { McpStdioClient, defaultGitNexusMcpArgs, parseGitNexusToolText } from './mcp-stdio-client.js';
 
 export interface GitNexusAdapterOptions {
   projectRoot: string;
@@ -38,17 +38,19 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
   private readonly mcp?: IMcpToolCaller;
   private readonly cli: ICliRunner;
   private readonly repoName?: string;
+  private readonly resolveBin: boolean;
 
   constructor(options: GitNexusAdapterOptions) {
     this.projectRoot = options.projectRoot;
     this.mcp = options.mcp;
+    this.resolveBin = !options.cli;
     this.cli = options.cli ?? new ExecFileCliRunner();
     this.repoName = options.repoName;
   }
 
   async getRepositoryStatus(input: RepositoryIdentityInput): Promise<CodeIndexStatus> {
     const cwd = input.worktree_path ?? input.repository_root ?? this.projectRoot;
-    const result = await this.cli.run(gitnexusBin(), ['status', '--json'], cwd);
+    const result = await this.cli.run(this.bin(), ['status', '--json'], cwd);
     if (result.code !== 0) {
       return {
         provider: 'gitnexus',
@@ -99,7 +101,7 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
 
   async analyze(input: RepositoryIdentityInput): Promise<void> {
     const cwd = input.worktree_path ?? input.repository_root ?? this.projectRoot;
-    const result = await this.cli.run(gitnexusBin(), ['analyze'], cwd, gitnexusCliEnv());
+    const result = await this.cli.run(this.bin(), ['analyze'], cwd, gitnexusCliEnv());
     if (result.code !== 0) {
       throw new CodeIntelligenceError(
         'GitNexus analyze failed',
@@ -189,6 +191,10 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
     });
   }
 
+  async close(): Promise<void> {
+    await this.mcp?.close();
+  }
+
   async detectChanges(input: DetectCodeChangesInput): Promise<SemanticChangeSet> {
     if (!input.worktree) {
       throw new CodeIntelligenceError('detect_changes requires an explicit worktree');
@@ -225,6 +231,10 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
     };
   }
 
+  private bin(): string {
+    return this.resolveBin ? gitnexusBin() : 'gitnexus';
+  }
+
   private repo(explicit?: string): string | undefined {
     const value = explicit ?? this.repoName ?? this.projectRoot;
     return value ? this.forGitnexus(value) : undefined;
@@ -249,6 +259,48 @@ export class GitNexusCodeIntelligence implements ICodeIntelligence {
     const result = await this.mcp.callTool(name, cleaned);
     return typeof result === 'string' ? parseGitNexusToolText(result) : result;
   }
+}
+
+export interface GitNexusIntelligenceHandle {
+  intelligence: GitNexusCodeIntelligence;
+  close: () => Promise<void>;
+}
+
+/** Shared MCP + CLI wiring for light CLI commands and the watcher. */
+export function createGitNexusIntelligence(projectRoot: string, repoName?: string): GitNexusIntelligenceHandle {
+  const spec = defaultGitNexusMcpArgs();
+  const mcp = new McpStdioClient(spec.command, spec.args, projectRoot);
+  return {
+    intelligence: new GitNexusCodeIntelligence({ projectRoot, mcp, repoName }),
+    close: () => mcp.close(),
+  };
+}
+
+/**
+ * Does not spawn GitNexus until the first graph/CLI call.
+ * Light commands that never touch admission pay only a function-object cost.
+ */
+export function createLazyCodeIntelligence(
+  projectRoot: string,
+  factory: () => ICodeIntelligence = () => createGitNexusIntelligence(projectRoot).intelligence,
+): ICodeIntelligence {
+  let inner: ICodeIntelligence | undefined;
+  const resolve = (): ICodeIntelligence => {
+    inner ??= factory();
+    return inner;
+  };
+  return {
+    getRepositoryStatus: (input) => resolve().getRepositoryStatus(input),
+    searchExisting: (input) => resolve().searchExisting(input),
+    getSymbolContext: (input) => resolve().getSymbolContext(input),
+    getImpact: (input) => resolve().getImpact(input),
+    getProcesses: (input) => resolve().getProcesses(input),
+    detectChanges: (input) => resolve().detectChanges(input),
+    analyze: (input) => resolve().analyze?.(input) ?? Promise.resolve(),
+    close: async () => {
+      await inner?.close?.();
+    },
+  };
 }
 
 function inferRepoName(root: string): string {

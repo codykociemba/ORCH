@@ -1,8 +1,13 @@
 /**
  * Linear issue tracker via official GraphQL HTTP API.
- * Secrets stay in LINEAR_API_KEY / workflow.linear.api_key_env — never task files.
+ * The Linear desktop app and Cursor Linear MCP cannot authenticate this CLI —
+ * they are other processes. Resolve a key from LINEAR_API_KEY or
+ * `~/.orchestry/linear.token` (`orch integration login`). Never store the key in task files.
  */
 
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import type { Agent } from '../../../domain/agent.js';
 import type { ReviewEvidence, VerificationEvidence } from '../../../domain/evidence.js';
 import type {
@@ -209,23 +214,7 @@ export class LinearIssueTracker implements IIssueTracker {
   }
 
   private async graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-    const response = await fetch('https://api.linear.app/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: this.apiKey,
-      },
-      body: JSON.stringify({ query, variables }),
-    });
-    const payload = await response.json() as { data?: T; errors?: Array<{ message: string }> };
-    if (!response.ok || payload.errors?.length) {
-      throw new LinearConfigError(
-        payload.errors?.map((item) => item.message).join('; ') || `Linear HTTP ${response.status}`,
-        'Check LINEAR_API_KEY and workflow.linear.team_key',
-      );
-    }
-    if (!payload.data) throw new LinearConfigError('Empty Linear response');
-    return payload.data;
+    return linearGraphql<T>(this.apiKey, query, variables);
   }
 }
 
@@ -239,12 +228,75 @@ export const LINEAR_STATE_FOR_TASK: Record<TaskStatus, string[]> = {
   cancelled: ['canceled', 'cancelled'],
 };
 
+export function linearTokenPath(): string {
+  const override = process.env['ORCH_LINEAR_TOKEN_PATH']?.trim();
+  return override ? path.resolve(override) : path.join(homedir(), '.orchestry', 'linear.token');
+}
+
+export function readStoredLinearApiKey(): string {
+  try {
+    const first = readFileSync(linearTokenPath(), 'utf8').split(/\r?\n/)[0] ?? '';
+    return first.trim();
+  } catch {
+    return '';
+  }
+}
+
+export function writeStoredLinearApiKey(apiKey: string): void {
+  const filePath = linearTokenPath();
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${apiKey.trim()}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+export function clearStoredLinearApiKey(): void {
+  try {
+    rmSync(linearTokenPath());
+  } catch {
+    /* already gone */
+  }
+}
+
+export function resolveLinearApiKey(envName = 'LINEAR_API_KEY'): string {
+  return (process.env[envName] ?? '').trim() || readStoredLinearApiKey();
+}
+
+export async function probeLinearApiKey(apiKey: string): Promise<{ name: string; teams: string[] }> {
+  const data = await linearGraphql<{
+    viewer: { name?: string };
+    teams: { nodes: Array<{ key: string }> };
+  }>(apiKey, '{ viewer { name } teams { nodes { key } } }');
+  return {
+    name: data.viewer.name ?? 'Linear user',
+    teams: data.teams.nodes.map((team) => team.key),
+  };
+}
+
+async function linearGraphql<T>(apiKey: string, query: string, variables?: Record<string, unknown>): Promise<T> {
+  const response = await fetch('https://api.linear.app/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: apiKey,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const payload = await response.json() as { data?: T; errors?: Array<{ message: string }> };
+  if (!response.ok || payload.errors?.length) {
+    throw new LinearConfigError(
+      payload.errors?.map((item) => item.message).join('; ') || `Linear HTTP ${response.status}`,
+      'Run `orch integration login` or set LINEAR_API_KEY. Check workflow.linear.team_key',
+    );
+  }
+  if (!payload.data) throw new LinearConfigError('Empty Linear response');
+  return payload.data;
+}
+
 export function createLinearTracker(workflow: {
   linear?: { enabled?: boolean; team_key?: string; api_key_env?: string };
 } | null): LinearIssueTracker | null {
   if (!workflow?.linear?.enabled) return null;
   const envName = workflow.linear.api_key_env ?? 'LINEAR_API_KEY';
-  const apiKey = process.env[envName];
+  const apiKey = resolveLinearApiKey(envName);
   if (!apiKey) return null;
   return new LinearIssueTracker(apiKey, workflow.linear.team_key);
 }

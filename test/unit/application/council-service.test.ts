@@ -56,7 +56,7 @@ describe('CouncilService', () => {
     const adapters: Record<string, IAgentAdapter> = {
       claude: adapter('claude', '{"status":"approved","reason":"reuse retry"}'),
       codex: adapter('codex', '{"status":"approved","reason":"agree"}'),
-      grok: adapter('grok', '{"status":"approved","reason":"agree"}'),
+      cursor: adapter('cursor', '{"status":"approved","reason":"agree"}'),
     };
     const service = new CouncilService(
       new CouncilStore(new Paths(root)),
@@ -66,7 +66,44 @@ describe('CouncilService', () => {
     const result = await service.convene({ plan });
     expect(result.verdict).toBe('approve');
     expect(result.votes).toHaveLength(3);
+    expect(result.votes.map((vote) => vote.adapter)).toEqual(['claude', 'codex', 'cursor']);
+    expect(result.votes[2]?.model).toBe('grok-4.6');
     expect(result.gitnexus_evidence?.searches).toContain('retry');
+  });
+
+  it('reads a JSON verdict out of a Cursor-style nested assistant message', async () => {
+    const adapters: Record<string, IAgentAdapter> = {
+      cursor: {
+        kind: 'cursor',
+        test: async () => ({ ok: true }),
+        execute: () => ({
+          pid: 1,
+          events: (async function* (): AsyncGenerator<AgentEvent> {
+            yield {
+              type: 'output',
+              timestamp: 't',
+              data: {
+                role: 'assistant',
+                content: [{ type: 'text', text: '{"status":"approved","reason":"nested cursor json"}' }],
+              },
+            };
+          })(),
+        }),
+        stop: async () => {},
+      },
+    };
+    const service = new CouncilService(
+      new CouncilStore(new Paths(root)),
+      (kind) => adapters[kind],
+      root,
+    );
+    const result = await service.convene({
+      plan,
+      members: [{ adapter: 'cursor', model: 'grok-4.6' }],
+    });
+    expect(result.verdict).toBe('revise');
+    expect(result.votes[0]?.verdict).toBe('approve');
+    expect(result.votes[0]?.summary).toContain('nested cursor json');
   });
 
   it('fail-closed revise when an adapter is missing', async () => {

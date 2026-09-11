@@ -62,6 +62,19 @@ export function gitnexusBin(): string {
   return process.platform === 'win32' ? 'gitnexus.cmd' : 'gitnexus';
 }
 
+const LOCAL_WIKI_PROVIDERS = new Set(['claude', 'cursor', 'codex', 'opencode', 'grok']);
+
+/** Local CLI wiki providers must see the host PATH; WSL GitNexus cannot. */
+export function gitnexusBinForWiki(args: string[] = []): string {
+  if (process.env['GITNEXUS_WIKI_USE_WSL'] === '1') return gitnexusBin();
+  const providerIndex = args.indexOf('--provider');
+  const provider = providerIndex >= 0 ? (args[providerIndex + 1] ?? '').toLowerCase() : '';
+  if (process.platform === 'win32' && LOCAL_WIKI_PROVIDERS.has(provider)) {
+    return 'gitnexus.cmd';
+  }
+  return gitnexusBin();
+}
+
 export function gitnexusJsEntry(): string | undefined {
   const candidates = [
     process.env['GITNEXUS_JS'],

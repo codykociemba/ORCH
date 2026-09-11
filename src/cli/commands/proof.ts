@@ -91,12 +91,19 @@ async function buildProof(container: LightContainer, taskId: string): Promise<{
   }
   const { ReviewStore } = await import('../../infrastructure/storage/review-store.js');
   const reviews = await new ReviewStore(container.paths).list(task.id);
+  const { WikiService } = await import('../../application/wiki-service.js');
+  const wiki = container.workflowConfig?.wiki?.enabled === false
+    ? undefined
+    : await new WikiService(container.context.projectRoot).evidence(
+      task.proof?.pr_url ? 'pr-preview' : 'local-preview',
+    );
   const service = new ProofService();
   const evidence = service.build({
     task,
     audit,
     headSha,
     reviews: reviews.length > 0 ? reviews : task.reviews,
+    wiki,
   });
   return { evidence, markdown: service.renderGitHub(evidence) };
 }

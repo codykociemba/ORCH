@@ -14,6 +14,7 @@ export class ProofService {
     headSha?: string;
     checks?: VerificationEvidence['checks'];
     reviews?: VerificationEvidence['reviews'];
+    wiki?: VerificationEvidence['wiki'];
   }): VerificationEvidence {
     const admission = input.audit
       ? {
@@ -47,6 +48,7 @@ export class ProofService {
       })),
       agent_summary: input.task.proof?.agent_summary,
       admission,
+      wiki: input.wiki,
       verified,
       verified_at: verified ? new Date().toISOString() : undefined,
     };

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GitNexusCodeIntelligence } from '../../../src/infrastructure/code-intelligence/gitnexus-adapter.js';
+import { GitNexusCodeIntelligence, createLazyCodeIntelligence } from '../../../src/infrastructure/code-intelligence/gitnexus-adapter.js';
 import { CodeIntelligenceError } from '../../../src/domain/errors.js';
 import type { ICliRunner, IMcpToolCaller } from '../../../src/infrastructure/code-intelligence/interface.js';
-import { resolveGitnexusSpawn, toWslPath, wrapWslGitnexus } from '../../../src/infrastructure/code-intelligence/cli-runner.js';
+import { gitnexusBinForWiki, resolveGitnexusSpawn, toWslPath, wrapWslGitnexus } from '../../../src/infrastructure/code-intelligence/cli-runner.js';
 import { parseGitNexusToolText } from '../../../src/infrastructure/code-intelligence/mcp-stdio-client.js';
 
 function cli(stdout: string, code = 0): ICliRunner {
@@ -220,6 +220,23 @@ describe('GitNexusCodeIntelligence', () => {
       expect.objectContaining({ repo: 'orch', worktree: '/tmp/orch-wt-fixture' }),
     );
   });
+
+  it('createLazyCodeIntelligence defers construction until the first call', async () => {
+    let built = 0;
+    const intelligence = createLazyCodeIntelligence('/repo', () => {
+      built += 1;
+      return new GitNexusCodeIntelligence({
+        projectRoot: '/repo',
+        cli: cli(JSON.stringify({ status: 'current', index: { commit: 'abc' } })),
+      });
+    });
+    expect(built).toBe(0);
+    const status = await intelligence.getRepositoryStatus({ repository_root: '/repo' });
+    expect(built).toBe(1);
+    expect(status.current).toBe(true);
+    await intelligence.getRepositoryStatus({ repository_root: '/repo' });
+    expect(built).toBe(1);
+  });
 });
 
 describe('parseGitNexusToolText', () => {
@@ -269,6 +286,21 @@ describe('resolveGitnexusSpawn', () => {
       expect(invoked.args.slice(1)).toEqual(['mcp']);
     } else {
       expect(invoked).toEqual({ command: 'gitnexus.cmd', args: ['mcp'] });
+    }
+  });
+});
+
+describe('gitnexusBinForWiki', () => {
+  it('uses native Windows GitNexus for local CLI providers', () => {
+    const previous = process.env['GITNEXUS_WIKI_USE_WSL'];
+    delete process.env['GITNEXUS_WIKI_USE_WSL'];
+    try {
+      if (process.platform === 'win32') {
+        expect(gitnexusBinForWiki(['--provider', 'claude'])).toBe('gitnexus.cmd');
+      }
+    } finally {
+      if (previous === undefined) delete process.env['GITNEXUS_WIKI_USE_WSL'];
+      else process.env['GITNEXUS_WIKI_USE_WSL'] = previous;
     }
   });
 });

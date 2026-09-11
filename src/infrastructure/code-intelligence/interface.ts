@@ -25,6 +25,7 @@ export interface ICodeIntelligence {
   getProcesses(input: ProcessQueryInput): Promise<ExecutionProcess[]>;
   detectChanges(input: DetectCodeChangesInput): Promise<SemanticChangeSet>;
   analyze?(input: RepositoryIdentityInput): Promise<void>;
+  close?(): Promise<void>;
 }
 
 export interface IMcpToolCaller {

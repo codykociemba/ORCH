@@ -30,7 +30,7 @@ Do not run Compound Engineering `lfg` or a whole-plan `ce-work` loop against the
 5+ units    Council required (Claude + Codex + Cursor Grok)
 ```
 
-`orch plan validate|import|reuse` routes and creates tasks. `orch council convene|save` records independent Claude/Codex/Grok votes. Tasks labeled `council-required` do not dispatch until `council_ref` is set.
+`orch plan validate|import|reuse` routes and creates tasks. `orch council convene|save` records independent Claude/Codex/Cursor (Grok 4.6) votes. Tasks labeled `council-required` do not dispatch until `council_ref` is set.
 
 ## Linear / proof / wiki
 

@@ -10,7 +10,10 @@ import type { AdmissionRequestType } from '../../domain/admission.js';
 export function registerAdmissionCommand(program: Command, container: LightContainer): void {
   const admission = program
     .command('admission')
-    .description('Code admission requests and audits (watcher-owned decisions)');
+    .description('Code admission requests and audits (watcher-owned decisions)')
+    .hook('postAction', async () => {
+      await container.codeIntelligence?.close?.();
+    });
 
   admission
     .command('request')

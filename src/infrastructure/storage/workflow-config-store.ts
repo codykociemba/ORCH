@@ -46,6 +46,18 @@ export class WorkflowConfigStore {
           ...raw.code_admission?.audit,
         },
       },
+      wiki: {
+        ...DEFAULT_WORKFLOW_CONFIG.wiki,
+        ...raw.wiki,
+        generator: {
+          ...DEFAULT_WORKFLOW_CONFIG.wiki?.generator,
+          ...raw.wiki?.generator,
+          llm: {
+            ...DEFAULT_WORKFLOW_CONFIG.wiki?.generator?.llm,
+            ...raw.wiki?.generator?.llm,
+          },
+        },
+      },
     };
   }
 

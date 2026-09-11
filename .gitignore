@@ -37,10 +37,16 @@ npm-debug.log*
 *.swo
 *~
 
-# Environment
+# Environment and CLI auth — never commit. Cursor `agent login` stores
+# tokens in the user profile (~/.cursor), not this repo. These patterns
+# catch a copy if one is ever dropped in the tree.
 .env
 .env.*
 !.env.example
+.env.local
+**/linear.token
+.cursor/*.json
+.cursor/**/*.json
 
 *.cpuprofile
 
@@ -48,7 +54,6 @@ npm-debug.log*
 archive
 
 docs
-.env.local
 
 # Orchestry state
 .orchestry

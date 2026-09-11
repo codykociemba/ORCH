@@ -47,8 +47,24 @@ export interface VerificationEvidence {
     incomplete: boolean;
     violations: string[];
   };
+  wiki?: WikiEvidence;
   verified: boolean;
   verified_at?: string;
+}
+
+export interface WikiEvidence {
+  enabled: boolean;
+  provider?: 'github' | 'gitlab';
+  mode: 'local-preview' | 'pr-preview' | 'canonical-publish';
+  source_sha: string;
+  index_current: boolean;
+  status: 'passed' | 'failed' | 'skipped' | 'bootstrap_required' | 'up_to_date';
+  pages_generated?: number;
+  pages_published?: number;
+  failed_modules?: string[];
+  artifact_url?: string;
+  canonical_wiki_url?: string;
+  summary?: string;
 }
 
 export type { TaskExternalRefs } from './task.js';

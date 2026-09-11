@@ -111,6 +111,61 @@ describe('CodeAdmissionService', () => {
     expect(contract?.allowed_dependencies).toEqual([]);
   });
 
+  it('strong exact symbol name auto-rejects without an LLM', async () => {
+    const intelligence = mockIntelligence({
+      searchExisting: async () => [{ path: 'src/application/orchestrator.ts', symbol: 'enqueueRetry' }],
+    });
+    const { service, taskA } = setup(intelligence);
+    const request = await service.submitRequest({
+      task_id: taskA.id,
+      type: 'new_symbol',
+      proposed: { name: 'enqueueRetry' },
+    });
+    expect(request.status).toBe('rejected');
+    expect(request.decision?.decided_by).toBe('gitnexus');
+    expect(request.decision?.redirect?.name).toBe('enqueueRetry');
+  });
+
+  it('exact GitNexus context hit auto-rejects even when search is empty', async () => {
+    const intelligence = mockIntelligence({
+      searchExisting: async () => [],
+      getSymbolContext: async () => ({
+        symbol: 'enqueueRetry',
+        path: 'src/application/orchestrator.ts',
+        callers: ['_handleRunFailure'],
+        callees: [],
+        processes: ['HandleRunFailure'],
+      }),
+    });
+    const { service, taskA } = setup(intelligence);
+    const request = await service.submitRequest({
+      task_id: taskA.id,
+      type: 'new_symbol',
+      proposed: { name: 'enqueueRetry' },
+    });
+    expect(request.status).toBe('rejected');
+    expect(request.decision?.decided_by).toBe('gitnexus');
+  });
+
+  it('does not treat a pathless context echo as a strong hit', async () => {
+    const intelligence = mockIntelligence({
+      searchExisting: async () => [],
+      getSymbolContext: async () => ({
+        symbol: 'BrandNewHelper',
+        callers: [],
+        callees: [],
+        processes: [],
+      }),
+    });
+    const { service, taskA } = setup(intelligence);
+    const request = await service.submitRequest({
+      task_id: taskA.id,
+      type: 'new_symbol',
+      proposed: { name: 'BrandNewHelper' },
+    });
+    expect(request.status).toBe('pending_llm');
+  });
+
   it('strong exact path hit auto-rejects without approving', async () => {
     const intelligence = mockIntelligence({
       searchExisting: async () => [{ path: 'src/sync/retry.ts', symbol: 'retry' }],

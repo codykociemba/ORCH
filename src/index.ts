@@ -34,7 +34,7 @@ export { WikiService } from './application/wiki-service.js';
 export { ReuseAnalysisService } from './application/reuse-analysis-service.js';
 export { resolvePonytailMode, renderPonytailPrompt } from './application/ponytail-policy.js';
 export { buildPlanManifest, describeRoute } from './application/plan-router.js';
-export { CouncilService } from './application/council-service.js';
+export { CouncilService, DEFAULT_COUNCIL_MEMBERS } from './application/council-service.js';
 export { verifySmallPlanReuse } from './application/plan-reuse-verifier.js';
 export { passesDispatchGates } from './application/dispatch-policy.js';
 export { parseCursorReview } from './application/cursor-review.js';
@@ -43,7 +43,7 @@ export { DEFAULT_WORKFLOW_CONFIG, isAdmissionEnabled } from './domain/workflow-c
 export type { ModificationContract } from './domain/modification-contract.js';
 export type { AdmissionRequest, AdmissionAuditResult } from './domain/admission.js';
 export type { ICodeIntelligence } from './infrastructure/code-intelligence/interface.js';
-export { GitNexusCodeIntelligence } from './infrastructure/code-intelligence/gitnexus-adapter.js';
+export { GitNexusCodeIntelligence, createGitNexusIntelligence, createLazyCodeIntelligence } from './infrastructure/code-intelligence/gitnexus-adapter.js';
 
 // Infrastructure interfaces
 export type { IAgentAdapter, AgentEvent, ExecuteParams, AdapterTestResult } from './infrastructure/adapters/interface.js';

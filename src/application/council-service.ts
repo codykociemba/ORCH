@@ -15,10 +15,12 @@ export interface CouncilMember {
   resolve: () => IAgentAdapter | undefined;
 }
 
-const DEFAULT_MEMBERS: Array<{ adapter: string; model: string; effort?: 'low' | 'medium' | 'high' }> = [
+/** Spec §5.2: Claude + Codex + Cursor Agent (Grok 4.6). Not the Grok CLI.
+ *  Do not pin stale Codex model IDs — omit `--model` and let the CLI default. */
+export const DEFAULT_COUNCIL_MEMBERS: Array<{ adapter: string; model: string; effort?: 'low' | 'medium' | 'high' }> = [
   { adapter: 'claude', model: 'claude' },
-  { adapter: 'codex', model: 'gpt-5.4', effort: 'medium' },
-  { adapter: 'grok', model: 'grok-4.6' },
+  { adapter: 'codex', model: 'codex', effort: 'medium' },
+  { adapter: 'cursor', model: 'grok-4.6', effort: 'high' },
 ];
 
 export class CouncilService {
@@ -33,7 +35,7 @@ export class CouncilService {
     plan: PlanManifest;
     members?: Array<{ adapter: string; model: string }>;
   }): Promise<CouncilResult> {
-    const members = input.members ?? DEFAULT_MEMBERS;
+    const members = input.members ?? DEFAULT_COUNCIL_MEMBERS;
     const { listLearnings, renderLearningContext } = await import('./learning-reader.js');
     const learningBlock = renderLearningContext(await listLearnings(this.workspace));
     const votes = await Promise.all(members.map((member) => this.ask(member, input.plan, learningBlock)));
@@ -111,8 +113,7 @@ export class CouncilService {
       let text = '';
       for await (const event of handle.events) {
         if (event.type === 'output' || event.type === 'done') {
-          const data = event.data as { text?: string; result?: string };
-          text += data.text ?? data.result ?? '';
+          text += collectAdapterText(event.data);
         }
       }
       const parsed = parseAdmissionDecision(text, member.adapter);
@@ -139,6 +140,25 @@ export class CouncilService {
       clearTimeout(timer);
     }
   }
+}
+
+/** Flatten Claude/Cursor/Codex event payloads so council can parse a JSON verdict. */
+export function collectAdapterText(data: unknown): string {
+  if (data == null) return '';
+  if (typeof data === 'string') return data;
+  if (typeof data !== 'object') return '';
+  const rec = data as Record<string, unknown>;
+  if (typeof rec.text === 'string') return rec.text;
+  if (typeof rec.result === 'string') return rec.result;
+  if (typeof rec.message === 'string') return rec.message;
+  if (Array.isArray(rec.content)) {
+    return rec.content.map((part) => collectAdapterText(part)).join('');
+  }
+  if (rec.message && typeof rec.message === 'object') {
+    return collectAdapterText(rec.message);
+  }
+  const raw = JSON.stringify(data);
+  return raw.includes('"status"') ? raw : '';
 }
 
 function tally(votes: CouncilMemberVote[]): CouncilVerdict {

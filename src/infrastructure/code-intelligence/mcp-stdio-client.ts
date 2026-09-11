@@ -42,7 +42,10 @@ export class McpStdioClient implements IMcpToolCaller {
     const proc = this.proc;
     this.proc = null;
     proc.stdin?.end();
+    proc.stdout?.destroy();
+    proc.stderr?.destroy();
     proc.kill('SIGTERM');
+    proc.unref();
     for (const [, waiter] of this.pending) {
       waiter.reject(new Error('MCP client closed'));
     }

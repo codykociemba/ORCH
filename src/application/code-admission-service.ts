@@ -548,17 +548,34 @@ export class CodeAdmissionService {
 
   private async collectHits(request: AdmissionRequest, task: Task): Promise<Array<{ path: string; symbol?: string }>> {
     if (!this.intelligence) return [];
+    const worktree = task.workspace ?? this.projectRoot;
+    const results: Array<{ path: string; symbol?: string }> = [];
+
+    if (request.proposed.name) {
+      try {
+        const context = await this.intelligence.getSymbolContext({
+          symbol: request.proposed.name,
+          path: request.proposed.path,
+          worktree,
+        });
+        if (context.path) {
+          results.push({ path: context.path, symbol: context.symbol || request.proposed.name });
+        }
+      } catch {
+        // A missing/failed exact lookup is not a hit.
+      }
+    }
+
     const queries = [
       ...(request.gitnexus_searches ?? []),
       request.proposed.name,
       request.proposed.path,
     ].filter((item): item is string => !!item);
 
-    const results: Array<{ path: string; symbol?: string }> = [];
     for (const query of queries) {
       const found = await this.intelligence.searchExisting({
         query,
-        worktree: task.workspace ?? this.projectRoot,
+        worktree,
       });
       for (const item of found) {
         results.push({ path: item.path, symbol: item.symbol });

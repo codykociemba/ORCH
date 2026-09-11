@@ -78,6 +78,7 @@ export interface LightContainer {
   teamService: TeamService;
   workflowConfig: WorkflowConfig | null;
   admissionStore: AdmissionStore;
+  codeIntelligence?: import('./infrastructure/code-intelligence/interface.js').ICodeIntelligence;
   codeAdmissionService: CodeAdmissionService;
   outboxStore: OutboxStore;
   integrationService: IntegrationService;
@@ -130,12 +131,15 @@ export async function buildLightContainer(context: CliContext): Promise<LightCon
   const teamService = new TeamService(teamStore, agentStore, taskStore, eventBus);
   const workflowConfig = await new WorkflowConfigStore(context.projectRoot).read();
   const admissionStore = new AdmissionStore(paths);
+  const { createLazyCodeIntelligence } = await import('./infrastructure/code-intelligence/gitnexus-adapter.js');
+  const codeIntelligence = createLazyCodeIntelligence(context.projectRoot);
   const codeAdmissionService = new CodeAdmissionService(
     admissionStore,
     taskStore,
     eventBus,
     workflowConfig,
     context.projectRoot,
+    codeIntelligence,
   );
   const outboxStore = new OutboxStore(paths);
   const integrationService = new IntegrationService(
@@ -175,6 +179,7 @@ export async function buildLightContainer(context: CliContext): Promise<LightCon
     teamService,
     workflowConfig,
     admissionStore,
+    codeIntelligence,
     codeAdmissionService,
     outboxStore,
     integrationService,
@@ -248,14 +253,6 @@ export async function buildFullContainer(context: CliContext): Promise<Container
   adapterRegistry.register(new AntigravityAdapter(processManager));
 
   const doctorService = new DoctorService(adapterRegistry, processManager, context.projectRoot);
-  const { GitNexusCodeIntelligence } = await import('./infrastructure/code-intelligence/gitnexus-adapter.js');
-  const { McpStdioClient, defaultGitNexusMcpArgs } = await import('./infrastructure/code-intelligence/mcp-stdio-client.js');
-  const mcpSpec = defaultGitNexusMcpArgs();
-  const mcp = new McpStdioClient(mcpSpec.command, mcpSpec.args, context.projectRoot);
-  const codeIntelligence = new GitNexusCodeIntelligence({
-    projectRoot: context.projectRoot,
-    mcp,
-  });
   const { AdapterAdmissionReviewer } = await import('./application/admission-reviewer.js');
   const admissionReviewer = new AdapterAdmissionReviewer(
     (kind) => (kind === 'codex' ? adapterRegistry.get('codex') : adapterRegistry.get('claude')),
@@ -267,7 +264,7 @@ export async function buildFullContainer(context: CliContext): Promise<Container
     light.eventBus,
     light.workflowConfig,
     context.projectRoot,
-    codeIntelligence,
+    light.codeIntelligence,
     workspaceManager,
     admissionReviewer,
   );

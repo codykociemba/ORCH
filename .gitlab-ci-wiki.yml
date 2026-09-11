@@ -1,0 +1,43 @@
+# Drop-in GitLab CI for GitNexus wiki. Preview on MRs; publish on default branch only.
+# Set GITNEXUS_WIKI_API_KEY (and optional GITNEXUS_WIKI_PROVIDER) as CI variables.
+# Canonical publish uses ORCH_GITLAB_WIKI_TOKEN / GITLAB_TOKEN.
+
+wiki-preview:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  image: node:22
+  script:
+    - npm i -g gitnexus
+    - export GITNEXUS_LBUG_BUFFER_POOL_SIZE="${GITNEXUS_LBUG_BUFFER_POOL_SIZE:-2147483648}"
+    - gitnexus analyze --index-only
+    - |
+      if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
+        echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY"
+        exit 0
+      fi
+      gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+    - echo "Do not publish the project wiki from an MR."
+  artifacts:
+    when: always
+    paths:
+      - .gitnexus/wiki
+    expire_in: 7 days
+
+wiki-publish:
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  image: node:22
+  script:
+    - npm i -g gitnexus
+    - export GITNEXUS_LBUG_BUFFER_POOL_SIZE="${GITNEXUS_LBUG_BUFFER_POOL_SIZE:-2147483648}"
+    - gitnexus analyze --index-only
+    - |
+      if [ -z "$GITNEXUS_WIKI_API_KEY" ]; then
+        echo "Wiki generate skipped: set GITNEXUS_WIKI_API_KEY"
+        exit 0
+      fi
+      gitnexus wiki --provider "${GITNEXUS_WIKI_PROVIDER:-openai}" --api-key "$GITNEXUS_WIKI_API_KEY"
+    - npm ci
+    - npx tsx src/bin/cli.ts wiki publish

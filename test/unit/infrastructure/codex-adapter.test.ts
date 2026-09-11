@@ -13,15 +13,13 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    execFile: vi.fn(
-      (
-        _cmd: string,
-        _args: string[],
-        cb: (err: Error | null, stdout: string, stderr: string) => void,
-      ) => {
-        cb(null, 'codex/1.0.0', '');
-      },
-    ),
+    execFile: vi.fn((...args: unknown[]) => {
+      const cb = args.find((arg) => typeof arg === 'function') as
+        | ((err: Error | null, stdout: string, stderr: string) => void)
+        | undefined;
+      cb?.(null, 'codex/1.0.0', '');
+      return {} as ReturnType<typeof actual.execFile>;
+    }),
   };
 });
 
@@ -69,13 +67,22 @@ describe('CodexAdapter', () => {
       adapter.execute(makeParams());
 
       expect(pm.spawn).toHaveBeenCalledWith(
-        'codex',
+        expect.any(String),
         expect.arrayContaining(['exec', '--json', '--sandbox', 'danger-full-access', '-']),
         expect.objectContaining({
           cwd: '/tmp/codex-ws',
           stdio: ['pipe', 'pipe', 'pipe'],
         }),
       );
+      const [command, args] = (pm.spawn as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[]];
+      expect(
+        command === 'codex'
+        || command === process.execPath
+        || /cmd(\.exe)?$/i.test(command),
+      ).toBe(true);
+      if (command === process.execPath) {
+        expect(args[0]).toMatch(/codex\.js$/);
+      }
     });
 
     it('writes prompt to stdin', () => {
@@ -493,18 +500,15 @@ describe('CodexAdapter', () => {
   describe('test', () => {
     it('returns errorKind SPAWN_FAILED when execFile throws an ENOENT error', async () => {
       const { execFile } = await import('node:child_process');
-      vi.mocked(execFile).mockImplementationOnce(
-        (
-          _cmd: unknown,
-          _args: unknown,
-          cb: (err: Error | null, stdout: string, stderr: string) => void,
-        ) => {
-          const err = new Error('spawn codex ENOENT');
-          (err as NodeJS.ErrnoException).code = 'ENOENT';
-          cb(err, '', '');
-          return {} as ReturnType<typeof execFile>;
-        },
-      );
+      vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
+        const cb = args.find((arg) => typeof arg === 'function') as
+          | ((err: Error | null, stdout: string, stderr: string) => void)
+          | undefined;
+        const err = new Error('spawn codex ENOENT');
+        (err as NodeJS.ErrnoException).code = 'ENOENT';
+        cb?.(err, '', '');
+        return {} as ReturnType<typeof execFile>;
+      });
 
       const proc = createMockProcess();
       const pm = createMockProcessManager(proc);

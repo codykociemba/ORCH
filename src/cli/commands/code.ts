@@ -5,16 +5,14 @@
 import type { Command } from 'commander';
 import type { LightContainer } from '../../container.js';
 import { printError, printKeyValue, dim } from '../output.js';
-import { GitNexusCodeIntelligence } from '../../infrastructure/code-intelligence/gitnexus-adapter.js';
-import { McpStdioClient, defaultGitNexusMcpArgs } from '../../infrastructure/code-intelligence/mcp-stdio-client.js';
+import { createGitNexusIntelligence } from '../../infrastructure/code-intelligence/gitnexus-adapter.js';
 
 function createIntelligence(projectRoot: string): {
-  intelligence: GitNexusCodeIntelligence;
-  mcp: McpStdioClient;
+  intelligence: ReturnType<typeof createGitNexusIntelligence>['intelligence'];
+  close: () => Promise<void>;
 } {
-  const spec = defaultGitNexusMcpArgs();
-  const mcp = new McpStdioClient(spec.command, spec.args, projectRoot);
-  return { intelligence: new GitNexusCodeIntelligence({ projectRoot, mcp }), mcp };
+  const handle = createGitNexusIntelligence(projectRoot);
+  return { intelligence: handle.intelligence, close: handle.close };
 }
 
 export function registerCodeCommand(program: Command, container: LightContainer): void {
@@ -26,7 +24,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
     .command('status')
     .description('Show GitNexus index freshness')
     .action(async () => {
-      const { intelligence, mcp } = createIntelligence(container.context.projectRoot);
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
       try {
         const status = await intelligence.getRepositoryStatus({
           repository_root: container.context.projectRoot,
@@ -49,7 +47,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       } finally {
-        await mcp.close();
+        await close();
       }
     });
 
@@ -57,7 +55,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
     .command('analyze')
     .description('Run gitnexus analyze (raises LadybugDB buffer pool if unset)')
     .action(async () => {
-      const { intelligence, mcp } = createIntelligence(container.context.projectRoot);
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
       try {
         await intelligence.analyze({ repository_root: container.context.projectRoot });
         const status = await intelligence.getRepositoryStatus({
@@ -76,7 +74,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       } finally {
-        await mcp.close();
+        await close();
       }
     });
 
@@ -85,7 +83,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
     .description('Search existing symbols/files')
     .option('--worktree <path>', 'Worktree to bind')
     .action(async (query: string, opts: { worktree?: string }) => {
-      const { intelligence, mcp } = createIntelligence(container.context.projectRoot);
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
       try {
         const hits = await intelligence.searchExisting({
           query,
@@ -106,7 +104,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       } finally {
-        await mcp.close();
+        await close();
       }
     });
 
@@ -115,7 +113,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
     .description('Show GitNexus impact for a symbol')
     .option('--worktree <path>', 'Worktree to bind')
     .action(async (symbol: string, opts: { worktree?: string }) => {
-      const { intelligence, mcp } = createIntelligence(container.context.projectRoot);
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
       try {
         const report = await intelligence.getImpact({
           target: symbol,
@@ -136,7 +134,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       } finally {
-        await mcp.close();
+        await close();
       }
     });
 
@@ -146,7 +144,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
     .option('--worktree <path>', 'Worktree to bind')
     .option('--scope <scope>', 'all|unstaged|staged', 'all')
     .action(async (opts: { worktree?: string; scope?: 'all' | 'unstaged' | 'staged' }) => {
-      const { intelligence, mcp } = createIntelligence(container.context.projectRoot);
+      const { intelligence, close } = createIntelligence(container.context.projectRoot);
       const worktree = opts.worktree ?? container.context.projectRoot;
       try {
         const changes = await intelligence.detectChanges({
@@ -173,7 +171,7 @@ export function registerCodeCommand(program: Command, container: LightContainer)
         printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       } finally {
-        await mcp.close();
+        await close();
       }
     });
 }

@@ -78,6 +78,15 @@ export interface WorkflowConfig {
     enabled?: boolean;
     provider?: 'github' | 'gitlab' | 'auto';
     publish_from?: 'default_branch';
+    generator?: {
+      provider?: 'gitnexus';
+      force?: boolean;
+      language?: string;
+      llm?: {
+        provider?: string;
+        model?: string;
+      };
+    };
   };
 }
 
@@ -135,6 +144,11 @@ export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
     enabled: true,
     provider: 'auto',
     publish_from: 'default_branch',
+    generator: {
+      provider: 'gitnexus',
+      force: false,
+      llm: { provider: 'auto' },
+    },
   },
 };
 

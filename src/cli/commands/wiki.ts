@@ -28,14 +28,26 @@ export function registerWikiCommand(program: Command, container: LightContainer)
         ['Branch', status.current_branch],
         ['Default', status.default_branch],
         ['Can publish', status.can_publish ? 'yes' : 'no'],
+        ['Bootstrap', status.bootstrap_required ? 'required' : 'ok'],
+        ['Pages', String(status.pages_generated)],
       ]);
+      if (status.bootstrap_required) {
+        console.log('  Enable the repository Wiki and create the first GitHub wiki page once.');
+      }
     });
 
   wiki
     .command('generate')
-    .description('Run gitnexus wiki generate')
-    .action(async () => {
-      const result = await service().generate();
+    .description('Run gitnexus wiki (writes .gitnexus/wiki; does not publish)')
+    .option('--provider <name>', 'GitNexus LLM provider (claude, codex, cursor, openai, …)')
+    .option('--model <name>', 'LLM model')
+    .option('--api-key <key>', 'HTTP provider API key')
+    .action(async (opts: { provider?: string; model?: string; apiKey?: string }) => {
+      const extra: string[] = [];
+      if (opts.provider) extra.push('--provider', opts.provider);
+      if (opts.model) extra.push('--model', opts.model);
+      if (opts.apiKey) extra.push('--api-key', opts.apiKey);
+      const result = await service().generate(extra);
       console.log(result.stdout || result.stderr);
     });
 
@@ -54,7 +66,11 @@ export function registerWikiCommand(program: Command, container: LightContainer)
     .action(async (opts: { force?: boolean }) => {
       try {
         const result = await service().publish({ force: opts.force });
-        printSuccess('wiki publish requested');
+        if (result.bootstrap_required) {
+          printError('BOOTSTRAP_REQUIRED');
+        } else {
+          printSuccess('wiki publish requested');
+        }
         if (result.stdout) console.log(result.stdout);
       } catch (err) {
         printError(err instanceof Error ? err.message : String(err));
@@ -70,6 +86,7 @@ export function registerWikiCommand(program: Command, container: LightContainer)
       printKeyValue([
         ['Host', status.host],
         ['Can publish', status.can_publish ? 'yes' : 'no'],
+        ['Bootstrap', status.bootstrap_required ? 'required' : 'ok'],
       ]);
     });
 }

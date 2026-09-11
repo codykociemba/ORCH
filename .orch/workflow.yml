@@ -28,7 +28,7 @@ code_admission:
     fail_on_partial: true
     fail_on_truncated: true
 linear:
-  enabled: false
+  enabled: true
   required_before_dispatch: false
   api_key_env: LINEAR_API_KEY
 github:
@@ -51,3 +51,8 @@ wiki:
   enabled: true
   provider: auto
   publish_from: default_branch
+  generator:
+    provider: gitnexus
+    force: false
+    llm:
+      provider: auto

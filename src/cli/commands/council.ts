@@ -80,7 +80,7 @@ export function registerCouncilCommand(program: Command, container: LightContain
 
   council
     .command('convene <file>')
-    .description('Run independent Claude + Codex + Grok review of a plan (does not dispatch)')
+    .description('Run independent Claude + Codex + Cursor (Grok 4.6) review of a plan (does not dispatch)')
     .action(async (file: string) => {
       const raw = await readJson<{
         id?: string;
@@ -115,21 +115,21 @@ export function registerCouncilCommand(program: Command, container: LightContain
         { AdapterRegistry },
         { ClaudeAdapter },
         { CodexAdapter },
-        { GrokAdapter },
+        { CursorAdapter },
         { CouncilService },
       ] = await Promise.all([
         import('../../infrastructure/process/process-manager.js'),
         import('../../infrastructure/adapters/registry.js'),
         import('../../infrastructure/adapters/claude.js'),
         import('../../infrastructure/adapters/codex.js'),
-        import('../../infrastructure/adapters/grok.js'),
+        import('../../infrastructure/adapters/cursor.js'),
         import('../../application/council-service.js'),
       ]);
       const pm = new ProcessManager({ foreground: true });
       const registry = new AdapterRegistry();
       registry.register(new ClaudeAdapter(pm));
       registry.register(new CodexAdapter(pm));
-      registry.register(new GrokAdapter(pm));
+      registry.register(new CursorAdapter(pm));
       const service = new CouncilService(store, (kind) => registry.get(kind), container.context.projectRoot);
       const result = await service.convene({ plan: manifest });
       if (result.plan_id) {
