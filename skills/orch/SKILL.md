@@ -1,6 +1,6 @@
 ---
 name: orch
-description: "AI agent orchestrator — manage teams of AI agents that work on your codebase in parallel. Use when the user wants to: run multiple agents, coordinate AI work, deploy agent teams, manage tasks/goals/agents, check orchestrator status, or mentions 'orch', 'orchestry', 'agents team', 'agent orchestration'."
+description: "AI agent orchestrator. Required path: orch plan draft → verify or council → import → assign by complexity. Use when the user wants to: /orch, plan, implement, coordinate agents, manage tasks, or mentions orch / orchestry. Do not start implementation with orch task add."
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent
 argument-hint: "[command or natural language request]"
 ---
@@ -11,9 +11,39 @@ You are the user's assistant for **ORCH** (`@oxgeneral/orch`) — an AI agent ru
 
 Your role: interpret user intent and execute the right `orch` CLI commands. The user may speak in natural language — translate their intent into concrete actions.
 
+## Required coding path (do not skip)
+
+When the user wants work done on a repo (`/orch`, "plan this", "implement", "fix", "ship"):
+
+1. **GitNexus first.** `orch code search "<concept>"` and `orch code impact <symbol>` on anything you might edit. Prefer reuse. Do not grep as a substitute for the graph unless impact is UNKNOWN.
+2. **Plan. Do not `orch task add` for implementation.**
+   ```bash
+   orch plan draft "<goal>"
+   ```
+3. **Verify or council — then import.**
+   - 1–2 units: `orch plan verify <plan.json>` (Codex, fail-closed). Import is blocked until this passes.
+   - 5+ units, or 3–4 high-risk (auth/payments/migrations/infra): `orch council convene <plan.json>`. Creates stay unauthorized until verdict is **approve**.
+   ```bash
+   orch plan import <plan.json>
+   ```
+4. **Assign by complexity** (`orch task assign <tsk> <agt>`), then `orch run` (not `--watch` on Windows unless you need it):
+   | Complexity | Agent | Adapter / model |
+   |---|---|---|
+   | Bounded impl | Cursor Worker | cursor / grok-4.6 |
+   | Normal Claude impl | Claude Opus | claude / claude-opus-5 |
+   | Complicated Claude | Claude Fable | claude / fable-5.1 |
+   | Medium Codex impl | Codex Terra | codex / terra |
+   | Really complicated | Codex Astra | codex / astra-medium |
+   | Verify / tests | Codex Verify | codex / luna |
+   | Plan / decompose | Claude Lead | claude / claude-opus-5 |
+5. **New file, exported/public symbol, or dependency:** `orch admission request`. Do not create it first. Workers never self-approve.
+6. **Do not** run Compound Engineering `lfg` or whole-plan `ce-work` against the same task graph.
+
+Unplanned `orch task add` is only for zero-create read-only probes. If `.orch/workflow.yml` has `require_plan_before_dispatch: true`, coding tasks will not dispatch without a plan.
+
 ## How to Work
 
-1. **Natural language → CLI commands**: User says "add a task to refactor auth" → you run `orch task add "Refactor auth module" -d "..." --scope "src/auth/**"`
+1. Follow **Required coding path** for any implementation. Do not jump to `orch task add`.
 2. **Always use `--json` flag** when you need to parse output programmatically
 3. **Chain commands** when the user's request requires multiple steps
 4. **Explain what you're doing** briefly before running commands
@@ -31,6 +61,8 @@ If there are no agents:
 orch agent shop  # or suggest pre-built org templates
 ```
 
+If the repo already has `.orch/workflow.yml`, start with `orch plan draft`, not `orch task add`.
+
 ## Complete CLI Reference
 
 ### Project Setup
@@ -45,7 +77,7 @@ orch status                        # Show orchestrator overview
 ### Task Management
 
 ```bash
-# Create tasks
+# Create tasks — probe / zero-create only. Implementation uses orch plan draft.
 orch task add "<title>" [options]
   -d, --description <desc>         # Task description
   -p, --priority <1-4>             # Priority (1=highest, default: 3)
@@ -122,7 +154,24 @@ orch serve [options]               # Headless daemon mode
   --verbose                        # Include agent:output events
 ```
 
+### Plan, Council, Admission, Code Graph
+
+```bash
+orch plan draft "<goal>"               # GitNexus reuse + units → .orch/plans/
+orch plan validate|reuse <plan.json>
+orch plan verify <plan.json>           # 1–2 units; Codex; fail-closed; required before import
+orch council convene <plan.json>       # 5+ units or high-risk 3–4; creates unauthorized until approve
+orch plan import <plan.json>           # materialize tasks after verify/council
+orch admission request|show|audit
+orch code search "<query>"
+orch code impact <symbol>
+orch proof publish <task>
+orch workflow doctor
+```
+
 ### Goals (High-Level Objectives)
+
+Do not use `orch goal add` as the start of implementation when `.orch/workflow.yml` exists. Use `orch plan draft`.
 
 ```bash
 orch goal add "<title>" [options]
@@ -214,98 +263,65 @@ orch logs [run-id]                 # View run logs
 ## Common Workflows
 
 ### "Set up a team to work on my project"
-1. `orch init` (if needed)
-2. `orch org deploy startup-mvp --goal "Build feature X"` OR manually create agents
-3. `orch tui` or `orch run --watch` to start
+1. `orch init` only if `.orchestry/` is missing. Never re-init a repo that already has `.orch/`.
+2. Create named agents (or `orch agent shop`) and a team. Do not invent placeholder IDs.
+3. Start work with `orch plan draft`, not `orch org deploy --goal` and not `orch run --watch` on Windows unless asked.
 
-### "Add a task and run it"
-1. `orch task add "Fix login bug" -d "The login form crashes on empty email" --scope "src/auth/**" -p 1`
-2. `orch run <task-id>`
+### "Implement / fix / ship this"
+1. `orch code search "<concept>"` then `orch code impact <symbol>` on anything you may edit
+2. `orch plan draft "<goal>"`
+3. 1–2 units: `orch plan verify <plan.json>`. 5+ or high-risk 3–4: `orch council convene <plan.json>`
+4. `orch plan import <plan.json>` only after verify/council approve
+5. `orch task assign <tsk> <agt>` using the complexity table above
+6. `orch run` (plain; avoid `--watch` on Windows unless needed)
+7. New file / exported symbol / dep: `orch admission request` before creating it
 
 ### "Check what's happening"
 1. `orch status` — overview
 2. `orch task list --status in_progress` — running tasks
 3. `orch logs --follow` — live output
 
-### "Deploy a review team for PRs"
-1. `orch org deploy pr-review-corp --goal "Review all open PRs"`
-2. Tasks are auto-created and assigned
-
-### "I want to refactor X across the codebase"
-1. Create a goal: `orch goal add "Refactor X" --description "..." --assignee <lead-agent>`
-2. Lead agent decomposes goal into tasks automatically
-3. `orch run --watch` to execute
+### "Unplanned probe only (zero-create)"
+`orch task add` is allowed only for read-only probes that create no files, symbols, or deps. Coding work must go through the plan path.
 
 ## Key Concepts
 
+- **Plans** (`orch plan draft`) are the start of coding work; verify/council then import
 - **Agents** run in isolated git worktrees (no merge conflicts)
 - **Tasks** flow through: todo → in_progress → review → done
-- **Goals** are decomposed into tasks by a lead agent
+- **Goals** are optional trackers, not a substitute for `orch plan draft`
 - **Teams** coordinate agents with a lead + members
 - **Adapters**: claude, opencode, codex, cursor, shell
 - **All state** stored in `.orchestry/` (YAML/JSON, no database)
 - **IDs** are prefixed: `tsk_`, `agt_`, `run_`, `goal_`, `team_`, `msg_`
 
-## When to Use Goals vs Tasks
+## When to Use Plan vs Task vs Goal
 
-### Use a Task when:
-- You know **exactly what needs to be done** — one concrete action
-- The scope is clear: fix a bug, write a test, update a file, review a PR
-- You can describe the result in one sentence
-- Examples: "Fix login crash on empty email", "Add unit tests for auth service", "Update README badges"
-
-```bash
-orch task add "Fix login crash" -d "Empty email causes TypeError in validate()" --scope "src/auth/**" -p 1
-```
-
-### Use a Goal when:
-- The objective is **high-level and needs decomposition** — you don't know all the steps upfront
-- Multiple tasks will be needed, potentially across different agents/skills
-- You want an agent to **autonomously plan and execute** the work
-- Examples: "Implement OAuth2", "Migrate from REST to GraphQL", "Improve test coverage to 80%"
+### Use `orch plan draft` when:
+- The user wants implementation, a fix, a refactor, or a ship
+- `.orch/workflow.yml` exists (almost always in Konci repos)
+- You need GitNexus reuse, verify/council, then import
 
 ```bash
-orch goal add "Implement OAuth2 with Google and GitHub" --description "Support social login, add tests, update docs" --assignee <lead-agent>
+orch plan draft "Fix login crash on empty email"
+orch plan verify <plan.json>   # or orch council convene
+orch plan import <plan.json>
+orch task assign <tsk> <agt>
+orch run
 ```
 
-The assigned agent enters **autonomous mode**: it analyzes the codebase, creates tasks, assigns them to appropriate agents, and monitors progress until the goal is achieved.
+### Use a Task (`orch task add`) only when:
+- Zero-create probe / read-only investigation
+- Or after plan import, to attach a follow-up that is still within the Modification Contract
 
-### Use a Goal for iterative improvement:
-- You have a **measurable metric** and want the agent to keep working until it's met
-- The agent runs cycles: measure → fix → measure again → repeat
-- Examples: "Get test coverage to 80%", "Zero TypeScript errors", "All /simplify reviews clean"
-
-```bash
-orch goal add "Reach 80% test coverage" --description "Run coverage, find gaps, write tests, repeat until ≥80%" --assignee <qa-agent>
-```
-
-### Choosing an assignee for a goal
-
-A goal without `--assignee` stays unassigned and no agent picks it up automatically. **Always assign a goal to an agent.**
-
-Before creating a goal, check available agents:
-```bash
-orch agent list
-```
-
-Pick the agent whose **role** best matches the goal:
-- Code quality / testing → QA agent
-- Architecture / refactoring → CTO / architect agent
-- Documentation → CTO or dedicated docs agent
-- Feature work → relevant domain agent (backend, frontend, etc.)
-- Strategic / cross-cutting → CEO or lead agent
-
-```bash
-# Example: assign docs update to CTO
-orch goal add "Update docs for v2" --description "..." --assignee agt_T0uF5KP
-```
-
-If no suitable agent exists, create one first via `orch agent add` or `orch agent shop`.
+### Use a Goal only when:
+- The user explicitly wants a long-lived objective tracked separately from a plan
+- Do **not** use `orch goal add` + lead autonomous decompose as a substitute for `orch plan draft`
 
 ### Rule of thumb
-- **1 agent, 1 action** → Task
-- **Multiple agents, unclear steps** → Goal
-- **Iterative loop until metric is met** → Goal
+- **Any coding work** → Plan draft → verify/council → import → assign
+- **Read-only probe** → Task (zero-create)
+- **Long-lived objective tracker** → Goal (optional; not the scheduler)
 
 ## Configuration Reference
 
@@ -462,6 +478,8 @@ Handled natively by Claude CLI. Use `package:skill-name` format (with colon):
 
 ### Tips
 
+- Do **not** assign the `investigate` library skill to the Cursor adapter on Windows — the prompt is too large for argv and the run stalls in `preparing`
+- Prefer the named Call Factory roster (Claude Lead / Opus / Fable, Cursor Worker, Codex Terra / Astra / Verify) over generic shop templates when that roster exists
 - Use `claude-opus-4-6` for strategic/review roles (architect, reviewer, lead) — higher quality reasoning
 - Use `claude-sonnet-4-6` for execution roles (developer, QA, writer) — faster, cheaper
 - Set `--approval-policy suggest` for strategic agents so humans review decisions
