@@ -16,6 +16,10 @@ const ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 export class Paths {
   constructor(private readonly projectRoot: string) {}
 
+  get repoRoot(): string {
+    return this.projectRoot;
+  }
+
   /** Root .orchestry/ directory */
   get root(): string {
     return path.join(this.projectRoot, ORCHESTRY_DIR);
@@ -83,6 +87,54 @@ export class Paths {
 
   get attachmentsDir(): string {
     return path.join(this.root, 'attachments');
+  }
+
+  get admissionDir(): string {
+    return path.join(this.root, 'admission');
+  }
+
+  admissionTaskPath(taskId: string): string {
+    return path.join(this.admissionDir, 'tasks', `${sanitizeId(taskId)}.json`);
+  }
+
+  admissionRequestPath(id: string): string {
+    return path.join(this.admissionDir, 'requests', `${sanitizeId(id)}.json`);
+  }
+
+  get reservationsPath(): string {
+    return path.join(this.admissionDir, 'reservations.json');
+  }
+
+  get outboxDir(): string {
+    return path.join(this.root, 'outbox');
+  }
+
+  outboxPath(id: string): string {
+    return path.join(this.outboxDir, `${sanitizeId(id)}.json`);
+  }
+
+  get learningsDir(): string {
+    return path.join(this.root, 'learnings');
+  }
+
+  learningPath(goalId: string): string {
+    return path.join(this.learningsDir, `${sanitizeId(goalId)}.json`);
+  }
+
+  get councilDir(): string {
+    return path.join(this.root, 'council');
+  }
+
+  councilPath(id: string): string {
+    return path.join(this.councilDir, `${sanitizeId(id)}.json`);
+  }
+
+  get reviewsDir(): string {
+    return path.join(this.root, 'reviews');
+  }
+
+  reviewsPath(taskId: string): string {
+    return path.join(this.reviewsDir, `${sanitizeId(taskId)}.json`);
   }
 
   taskAttachmentsDir(taskId: string): string {

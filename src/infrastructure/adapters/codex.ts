@@ -16,8 +16,30 @@ import {
 } from '../../domain/errors.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
+
+function codexJsEntry(): string | undefined {
+  const candidates = [
+    path.join(process.env['APPDATA'] ?? '', 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
+    path.join(process.cwd(), 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate));
+}
+
+function codexExec(args: string[]): { command: string; args: string[] } {
+  const js = process.platform === 'win32' ? codexJsEntry() : undefined;
+  if (js) return { command: process.execPath, args: [js, ...args] };
+  if (process.platform === 'win32') {
+    return {
+      command: process.env['ComSpec'] ?? 'cmd.exe',
+      args: ['/d', '/s', '/c', 'codex.cmd', ...args],
+    };
+  }
+  return { command: 'codex', args };
+}
 
 export class CodexAdapter implements IAgentAdapter {
   readonly kind = 'codex';
@@ -26,13 +48,16 @@ export class CodexAdapter implements IAgentAdapter {
 
   async test(): Promise<AdapterTestResult> {
     try {
-      const { stdout } = await execFileAsync('codex', ['--version']);
+      const invoked = codexExec(['--version']);
+      const { stdout } = await execFileAsync(invoked.command, invoked.args, {
+        windowsHide: true,
+      });
       return { ok: true, version: stdout.trim() };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
         ok: false,
-        error: 'Codex CLI not found. Install: npm i -g @openai/codex',
+        error: `Codex CLI not found: ${msg}. Install: npm i -g @openai/codex`,
         errorKind: classifyAdapterError(msg),
       };
     }
@@ -42,24 +67,28 @@ export class CodexAdapter implements IAgentAdapter {
     const args = [
       'exec',
       '--json',
+      '--ignore-user-config',
       '--sandbox', 'danger-full-access', // autonomous agents can't respond to approval prompts
     ];
 
     if (params.config.model) {
       args.push('--model', params.config.model);
     }
+    if (params.config.effort) {
+      args.push('-c', `model_reasoning_effort=${params.config.effort}`);
+    }
 
-    // Read prompt from stdin (avoids ARG_MAX limits on long prompts)
     args.push('-');
 
-    const { process: proc, pid } = this.processManager.spawn('codex', args, {
+    const invoked = codexExec(args);
+    const { process: proc, pid } = this.processManager.spawn(invoked.command, invoked.args, {
       cwd: params.workspace,
       env: { ...process.env, ...params.env },
       signal: params.signal,
-      stdio: ['pipe', 'pipe', 'pipe'], // stdin must be 'pipe' to send prompt
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: false,
     });
 
-    // Pipe prompt via stdin — prepend system prompt if present (Codex has no native --system-prompt)
     if (proc.stdin) {
       proc.stdin.write(buildFullPrompt(params.systemPrompt, params.prompt));
       proc.stdin.end();

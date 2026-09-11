@@ -1,0 +1,26 @@
+# PR wiki preview only. Never publish canonical wiki from PR HEAD.
+name: wiki-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preview only
+        run: |
+          if command -v gitnexus >/dev/null 2>&1; then
+            gitnexus wiki generate
+            gitnexus wiki preview
+          else
+            echo "gitnexus not installed on this runner — preview skipped (do not publish)."
+          fi
+          echo "Do not gitnexus wiki publish from a feature branch."
+          echo "Canonical publish belongs on default-branch CI only."

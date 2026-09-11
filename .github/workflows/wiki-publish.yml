@@ -1,0 +1,25 @@
+# Canonical wiki publish — default branch only. Never run this on PR HEAD.
+name: wiki-publish
+
+on:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish GitNexus wiki from default branch
+        run: |
+          echo "Trusted default-branch context: ${GITHUB_REF_NAME}"
+          if command -v gitnexus >/dev/null 2>&1; then
+            gitnexus wiki publish
+          else
+            echo "gitnexus not installed on this runner — skip publish (install GitNexus to enable)."
+          fi
+          echo "Do not use --force. PR previews belong in wiki-preview.yml."

@@ -132,6 +132,8 @@ describe('Container extends LightContainer', () => {
     expect(c).toHaveProperty('runService');
     expect(c).toHaveProperty('messageService');
     expect(c).toHaveProperty('teamService');
+    expect(c).toHaveProperty('codeAdmissionService');
+    expect(c).toHaveProperty('integrationService');
 
     // Container-only fields (heavy deps)
     expect(c).toHaveProperty('orchestrator');

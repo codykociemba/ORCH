@@ -6,6 +6,7 @@
 
 import type { AdapterRegistry } from '../infrastructure/adapters/registry.js';
 import type { IProcessManager } from '../infrastructure/process/process-manager.js';
+import { detectWslGitnexus, gitnexusBin, resolveGitnexusSpawn } from '../infrastructure/code-intelligence/cli-runner.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
@@ -73,6 +74,9 @@ export class DoctorService {
     // Check node
     checks.push(await this.checkCommand('node', ['--version'], 'node'));
 
+    checks.push(...await this.checkGitNexusStack());
+    checks.push(this.checkPonytailHint());
+
     return {
       checks,
       adaptersReady,
@@ -113,6 +117,84 @@ export class DoctorService {
         detail: 'no .gitignore found — .orchestry may be committed to git. Run: orch init',
       };
     }
+  }
+
+  private async checkGitNexus(): Promise<DoctorCheck> {
+    const nativeWindows = process.platform === 'win32' && !process.env['WSL_DISTRO_NAME'];
+    const invoked = resolveGitnexusSpawn(gitnexusBin(), ['--version']);
+    const result = await this.checkCommand(invoked.command, invoked.args, 'gitnexus');
+    if (result.status === 'ok') {
+      return {
+        ...result,
+        detail: nativeWindows
+          ? `${result.detail} — prefer WSL2 GitNexus (set GITNEXUS_BIN=wsl); native Windows is best-effort`
+          : result.detail,
+      };
+    }
+    return {
+      name: 'gitnexus',
+      status: nativeWindows ? 'skip' : 'fail',
+      detail: nativeWindows
+        ? 'GitNexus not on PATH. Supported on Linux/macOS/WSL2; native Windows is best-effort.'
+        : 'gitnexus: command not found — install GitNexus for code admission',
+    };
+  }
+
+  private async checkGitNexusStack(): Promise<DoctorCheck[]> {
+    const binary = await this.checkGitNexus();
+    const checks: DoctorCheck[] = [binary];
+    if (binary.status !== 'ok') {
+      checks.push({
+        name: 'gitnexus index',
+        status: 'skip',
+        detail: 'GitNexus CLI unavailable — index/MCP checks skipped',
+      });
+      return checks;
+    }
+    try {
+      const { GitNexusCodeIntelligence } = await import('../infrastructure/code-intelligence/gitnexus-adapter.js');
+      const intel = new GitNexusCodeIntelligence({ projectRoot: this.cwd });
+      const status = await intel.getRepositoryStatus({ repository_root: this.cwd });
+      const indexHint = status.available
+        ? status.repo
+        : `${status.repo || 'not indexed'} — if analyze OOMs, set GITNEXUS_LBUG_BUFFER_POOL_SIZE=2147483648`;
+      checks.push({
+        name: 'gitnexus index',
+        status: status.available ? 'ok' : 'fail',
+        detail: indexHint,
+      });
+      const currentDetail = status.index_commit
+        ?? (status.incomplete_reasons.join('; ') || 'index not current');
+      checks.push({
+        name: 'gitnexus current',
+        status: status.current ? 'ok' : 'fail',
+        detail: detectWslGitnexus()
+          ? `${currentDetail} — using WSL2 GitNexus`
+          : process.platform === 'win32'
+            ? `${currentDetail} — native Windows is best-effort; prefer GITNEXUS_BIN=wsl`
+            : currentDetail,
+      });
+    } catch (err) {
+      checks.push({
+        name: 'gitnexus index',
+        status: 'fail',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    checks.push({
+      name: 'gitnexus detect_changes worktree',
+      status: 'ok',
+      detail: 'Adapter requires an explicit worktree and passes it to MCP (see gitnexus-adapter tests)',
+    });
+    return checks;
+  }
+
+  private checkPonytailHint(): DoctorCheck {
+    return {
+      name: 'ponytail',
+      status: 'skip',
+      detail: 'Optional behavioral nudge (https://github.com/DietrichGebert/ponytail). Not an enforcement gate.',
+    };
   }
 
   private async checkGitRepo(): Promise<DoctorCheck> {

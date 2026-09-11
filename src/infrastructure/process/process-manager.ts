@@ -20,6 +20,8 @@ export interface IProcessManager {
 }
 
 export class ProcessManager implements IProcessManager {
+  constructor(private readonly opts: { foreground?: boolean } = {}) {}
+
   isAlive(pid: number): boolean {
     try {
       process.kill(pid, 0);
@@ -62,9 +64,10 @@ export class ProcessManager implements IProcessManager {
   }
 
   spawn(command: string, args: string[], options?: SpawnOptions): SpawnResult {
+    const detached = options?.detached ?? !this.opts.foreground;
     const proc = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true, // Create new process group so killWithGrace(-pid) kills all children
+      detached, // Default true so killWithGrace(-pid) can target the group
       ...options,
     });
 
@@ -72,9 +75,9 @@ export class ProcessManager implements IProcessManager {
       throw new Error(`Failed to spawn process: ${command}`);
     }
 
-    // Allow parent to exit without waiting for this child.
-    // Pipes (stdout/stderr) still hold refs while being read — that's intentional.
-    proc.unref();
+    // Allow the watcher to exit without waiting for adapter children.
+    // One-shot CLI (plan verify / council convene) must pass detached: false.
+    if (detached) proc.unref();
 
     return { process: proc, pid: proc.pid };
   }

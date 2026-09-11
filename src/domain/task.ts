@@ -5,6 +5,8 @@
  * It moves through a state machine: todo → in_progress → review → done.
  */
 
+import type { ReviewEvidence } from './evidence.js';
+
 export type TaskStatus =
   | 'todo'
   | 'in_progress'
@@ -33,6 +35,20 @@ export interface TaskProof {
   files_changed: string[];
   test_results?: string;
   agent_summary?: string;
+  head_sha?: string;
+  verified?: boolean;
+}
+
+export interface TaskExternalRefs {
+  linear?: {
+    id: string;
+    identifier?: string;
+    url?: string;
+  };
+  github?: {
+    pr_url?: string;
+    pr_number?: number;
+  };
 }
 
 export interface Task {
@@ -57,6 +73,12 @@ export interface Task {
   feedback?: string;
   goalId?: string;
   attachments?: string[];
+  external?: TaskExternalRefs;
+  plan_id?: string;
+  plan_unit_id?: string;
+  council_ref?: string;
+  reviews?: ReviewEvidence[];
+  acceptance_criteria?: string[];
 }
 
 export interface CreateTaskInput {
@@ -72,4 +94,8 @@ export interface CreateTaskInput {
   scope?: string[];
   goalId?: string;
   attachments?: string[];
+  plan_id?: string;
+  plan_unit_id?: string;
+  council_ref?: string;
+  acceptance_criteria?: string[];
 }

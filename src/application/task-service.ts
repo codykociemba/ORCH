@@ -72,6 +72,10 @@ export class TaskService {
       review_criteria: input.review_criteria,
       scope: input.scope,
       goalId: input.goalId,
+      plan_id: input.plan_id,
+      plan_unit_id: input.plan_unit_id,
+      council_ref: input.council_ref,
+      acceptance_criteria: input.acceptance_criteria,
     };
 
     if (input.attachments?.length && this.paths) {

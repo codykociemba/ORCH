@@ -177,6 +177,8 @@ export function createMockWorkspaceManager(): IWorkspaceManager {
     mergeBack: vi.fn(async () => ({ success: true as const })),
     cleanup: vi.fn(async () => {}),
     validate: vi.fn(),
+    getChangedFiles: vi.fn(async () => []),
+    getChangedFileDiffs: vi.fn(async () => []),
   };
 }
 

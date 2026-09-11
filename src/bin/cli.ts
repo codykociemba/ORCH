@@ -27,6 +27,16 @@ const LIGHT_COMMANDS: Record<string, (program: Command, container: LightContaine
   goal:    async (p, c) => { const m = await import('../cli/commands/goal.js');    m.registerGoalCommand(p, c); },
   team:    async (p, c) => { const m = await import('../cli/commands/team.js');    m.registerTeamCommand(p, c); },
   org:     async (p, c) => { const m = await import('../cli/commands/org.js');     m.registerOrgCommand(p, c); },
+  admission: async (p, c) => { const m = await import('../cli/commands/admission.js'); m.registerAdmissionCommand(p, c); },
+  code:    async (p, c) => { const m = await import('../cli/commands/code.js');    m.registerCodeCommand(p, c); },
+  workflow: async (p, c) => { const m = await import('../cli/commands/workflow.js'); m.registerWorkflowCommand(p, c); },
+  proof:   async (p, c) => { const m = await import('../cli/commands/proof.js');   m.registerProofCommand(p, c); },
+  integration: async (p, c) => { const m = await import('../cli/commands/integration.js'); m.registerIntegrationCommand(p, c); },
+  plan:    async (p, c) => { const m = await import('../cli/commands/plan.js');    m.registerPlanCommand(p, c); },
+  wiki:    async (p, c) => { const m = await import('../cli/commands/wiki.js');    m.registerWikiCommand(p, c); },
+  pr:      async (p, c) => { const m = await import('../cli/commands/pr.js');      m.registerPrCommand(p, c); },
+  council: async (p, c) => { const m = await import('../cli/commands/council.js'); m.registerCouncilCommand(p, c); },
+  review: async (p, c) => { const m = await import('../cli/commands/review.js'); m.registerReviewCommand(p, c); },
 };
 
 /** Commands that need orchestrator + adapters + template engine (heavy path). */
@@ -71,6 +81,16 @@ const COMMAND_STUBS: Array<[name: string, description: string]> = [
   ['serve',   'Headless daemon mode with structured logs'],
   ['init',    'Initialize project'],
   ['update',  'Check for updates'],
+  ['admission', 'Code admission requests and audits'],
+  ['code',    'Query the GitNexus code graph'],
+  ['workflow', 'Team workflow config'],
+  ['proof',   'Verification proof'],
+  ['integration', 'Linear / GitHub sync'],
+  ['plan',    'Validate and route a plan manifest'],
+  ['wiki',    'GitNexus wiki generate / publish'],
+  ['pr',      'Link GitHub pull requests'],
+  ['council', 'Record multi-model council review'],
+  ['review',  'Ingest PR review evidence'],
 ];
 
 /** Set of all known subcommand names (derived from COMMAND_STUBS). */

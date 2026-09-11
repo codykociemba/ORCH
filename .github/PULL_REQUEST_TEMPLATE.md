@@ -24,6 +24,14 @@
 
 <!-- How did you verify this works? Include commands, scenarios, or screenshots. -->
 
+## Linear
+
+<!-- Fixes ENG-123  or  Contributes to ENG-123 -->
+
+## ORCH
+
+<!-- Task: `tsk_…`  Plan: `plan_…`  Plan unit: `U-…`  Council: `cnc_…` -->
+
 ## Related issues
 
 <!-- Link related issues: Fixes #123, Closes #456 -->

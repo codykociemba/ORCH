@@ -1,0 +1,11 @@
+---
+description: ORCH team workflow — scheduler, admission, Linear, proof
+alwaysApply: true
+---
+
+- ORCH is the only execution scheduler. Do not run Compound Engineering `lfg` / whole-plan `ce-work` against the same task graph.
+- GitNexus is the sole code graph. Do not add a second index or homemade symbol catalog.
+- Unplanned tasks get a zero-create Modification Contract. New files/symbols/deps require `orch admission request`. The watcher decides; strong hits skip the LLM.
+- Do not create duplicate Linear issues. Use `task.external.linear`.
+- Proof must bind to HEAD SHA. Failed admission cannot be Verified.
+- Canonical wiki publish is default-branch only.

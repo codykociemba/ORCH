@@ -15,6 +15,9 @@ coverage/
 
 # Internal docs
 docs/
+!docs/solutions/
+!docs/solutions/**
+!docs/workflow.md
 
 # Landing pages
 landing/
@@ -46,3 +49,9 @@ archive
 
 docs
 .env.local
+
+# Orchestry state
+.orchestry
+
+# GitNexus local graph (rebuild with gitnexus analyze)
+.gitnexus

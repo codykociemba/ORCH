@@ -42,7 +42,17 @@ export type OrchestratorEvent =
   | { type: 'goal:created'; goalId: string; title: string }
   | { type: 'goal:status_changed'; goalId: string; from: GoalStatus; to: GoalStatus }
   | { type: 'goal:updated'; goalId: string }
-  | { type: 'goal:deleted'; goalId: string };
+  | { type: 'goal:deleted'; goalId: string }
+  | { type: 'code_admission:contract_created'; taskId: string }
+  | { type: 'code_admission:request_created'; taskId: string; requestId: string; requestType: string }
+  | { type: 'code_admission:request_decided'; taskId: string; requestId: string; approved: boolean }
+  | { type: 'code_admission:audit_started'; taskId: string }
+  | { type: 'code_admission:audit_completed'; taskId: string; passed: boolean; violations: string[] }
+  | { type: 'code_intelligence:index_stale'; taskId?: string; repo: string }
+  | { type: 'code_intelligence:index_refreshed'; taskId?: string; repo: string }
+  | { type: 'wiki:generated'; branch: string }
+  | { type: 'wiki:publish_blocked'; branch: string; defaultBranch: string }
+  | { type: 'wiki:published'; host: string; branch: string };
 
 export type OrchestratorEventType = OrchestratorEvent['type'];
 

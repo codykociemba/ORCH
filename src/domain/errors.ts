@@ -130,6 +130,27 @@ export class WorkspaceError extends OrchestryError {
   }
 }
 
+export class CodeIntelligenceError extends OrchestryError {
+  constructor(message: string, hint?: string) {
+    super(message, 1, hint);
+    this.name = 'CodeIntelligenceError';
+  }
+}
+
+export class AdmissionError extends OrchestryError {
+  constructor(message: string, hint?: string) {
+    super(message, 1, hint);
+    this.name = 'AdmissionError';
+  }
+}
+
+export class AdmissionAuditError extends OrchestryError {
+  constructor(message: string, hint?: string) {
+    super(message, 1, hint);
+    this.name = 'AdmissionAuditError';
+  }
+}
+
 // ── Adapter Error Classification ──────────────────────────────────
 
 export enum AdapterErrorKind {

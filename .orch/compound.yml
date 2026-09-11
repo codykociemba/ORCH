@@ -1,0 +1,25 @@
+# Compound Engineering is the planning/review/learning methodology.
+# ORCH is the only execution scheduler. Do not run lfg or whole-plan ce-work
+# against the same task graph.
+methodology: compound-engineering
+scheduler: orch
+lead: claude
+verify: codex
+council:
+  required_task_count: 5
+  members:
+    - claude
+    - codex
+    - cursor-grok
+invoke:
+  - ce-brainstorm
+  - ce-plan
+  - ce-doc-review
+  - ce-code-review
+  - ce-simplify-code
+  - ce-compound
+  - ce-compound-refresh
+forbidden:
+  - lfg
+  - ce-work
+learnings: docs/solutions

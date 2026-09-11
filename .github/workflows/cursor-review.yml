@@ -1,0 +1,53 @@
+# Cursor automated PR review (spec Phase F).
+# Secrets never run on fork PRs. The LLM does not post the review — the script does.
+name: cursor-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.CURSOR_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Cursor CLI
+        run: |
+          curl https://cursor.com/install -fsS | bash
+          echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cursor CLI review
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CURSOR_REVIEW_MODEL: grok-4.6
+        run: |
+          set +e
+          agent -p "$(cat .github/cursor-review-prompt.md)" --model grok-4.6 > /tmp/cursor-review.txt
+          echo $? > /tmp/cursor-review.exit
+          set -e
+          test -s /tmp/cursor-review.txt || echo '{"verdict":"changes_requested","summary":"Cursor CLI produced no output"}' > /tmp/cursor-review.txt
+
+      - name: Publish structured review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/cursor-pr-review.mjs /tmp/cursor-review.txt
+
+      - name: Upload review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cursor-review
+          path: cursor-review.json
+          if-no-files-found: ignore

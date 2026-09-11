@@ -32,7 +32,7 @@ import {
 import { TaskRow, STATUS_ORDER, GoalSectionRow, UngroupedSectionRow } from './components/TaskList.js';
 import { AgentRow, AGENT_STATUS_ORDER, TeamSectionRow, UnassignedSectionRow } from './components/AgentList.js';
 import { GoalRow, GOAL_STATUS_ORDER } from './components/GoalList.js';
-import { DetailPanel, SectionDivider } from './components/DetailPanel.js';
+import { DetailPanel, SectionDivider, type AdmissionSummary } from './components/DetailPanel.js';
 import { Header } from './components/Header.js';
 import type { HeaderStats, HeaderTokens } from './components/Header.js';
 import { TABS } from './components/TabBar.js';
@@ -137,6 +137,7 @@ export interface AppProps {
   onSubscribeEvents?: (handler: (event: OrchestratorEvent) => void) => (() => void);
   // Live refresh callbacks
   onRefreshTasks?: () => Promise<Task[]>;
+  onGetAdmission?: (taskId: string) => Promise<AdmissionSummary | undefined>;
   onRefreshAgents?: () => Promise<Agent[]>;
   onRefreshState?: () => Promise<OrchestratorState>;
   // History (loaded progressively from disk on startup)
@@ -331,7 +332,7 @@ export function App({
   projectName, tasks: initialTasks, agents: initialAgents = [], state: initialState,
   onRunTask, onCreateTask, onCancelTask, onRetryTask, onAssignTask,
   onRunAll, onDisableAgent, onEnableAgent, onSubscribeEvents,
-  onRefreshTasks, onRefreshAgents, onRefreshState, onLoadHistory,
+  onRefreshTasks, onGetAdmission, onRefreshAgents, onRefreshState, onLoadHistory,
   onAddAgent, onDeleteAgent, onApproveTask, onRejectTask, onDeleteTask,
   onUpdateTask, onUpdateAgent, onForceStopAgent,
   onCreateTeam, onListTeams, onJoinTeam, onLeaveTeam, onDisbandTeam, onSetTeamLead,
@@ -621,6 +622,20 @@ export function App({
   const hiddenTaskCount = sortedTasks.length - visibleTasks.length;
 
   const selectedTask = sortedTasks[taskSelectedIndex] as Task | undefined;
+  const [admission, setAdmission] = useState<AdmissionSummary | undefined>(undefined);
+  useEffect(() => {
+    if (!selectedTask || !onGetAdmission) {
+      setAdmission(undefined);
+      return;
+    }
+    let cancelled = false;
+    onGetAdmission(selectedTask.id).then((summary) => {
+      if (!cancelled) setAdmission(summary);
+    }).catch(() => {
+      if (!cancelled) setAdmission(undefined);
+    });
+    return () => { cancelled = true; };
+  }, [selectedTask?.id, onGetAdmission]);
 
   // Build task ID → title map for agent view
   const taskTitleMap = useMemo(() => {
@@ -2692,7 +2707,8 @@ export function App({
           <DetailPanel task={selectedTask} height={feedH} width={ruleW}
             taskLogs={memoizedTaskLogs}
             agentNameMap={agentNameMap}
-            taskTitleMap={taskTitleMap} />
+            taskTitleMap={taskTitleMap}
+            admission={admission} />
         </>
       ) : showGoalDetail ? (
         <>

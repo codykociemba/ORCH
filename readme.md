@@ -476,6 +476,27 @@ WantedBy=multi-user.target
 
 <br/>
 
+## Team engineering workflow
+
+This fork ships a repo-installed team workflow (`.orch/workflow.yml`):
+
+- **ORCH** is the only execution scheduler. Compound Engineering owns planning / review / learning methodology — not a second scheduler.
+- **GitNexus** is the sole code graph. ORCH owns reuse-first **code admission**. Unplanned tasks get a zero-create Modification Contract; new files/symbols/deps need `orch admission request`. The watcher decides. Strong exact hits skip the LLM. Git + GitNexus audit runs before worktree merge-back.
+- **Linear** mirroring is deterministic (`task.external.linear`) when `linear.enabled` is set. **Proof** binds to HEAD SHA (`orch proof`). **Wiki** generate/preview is allowed on PRs; canonical publish is default-branch only (`orch wiki publish`).
+- Supported GitNexus runtime: Linux / macOS / WSL2. On Windows, ORCH prefers WSL GitNexus (`GITNEXUS_BIN=wsl`). Native Windows is best-effort.
+
+```bash
+orch workflow doctor
+orch admission show <task>          # no PID lock
+orch code search "retry"
+orch code detect                    # worktree-bound semantic diff
+orch plan draft "Add retry behavior"
+orch proof <task>
+orch wiki status
+```
+
+<br/>
+
 ## Full CLI reference
 
 <details>
@@ -485,6 +506,18 @@ WantedBy=multi-user.target
 orch init                          # Initialize project
 orch doctor                        # System diagnostics
 orch update                        # Check for updates
+orch workflow doctor               # Team workflow config
+orch admission request|show|audit  # Code admission (no PID lock)
+orch code search|impact|status|detect  # GitNexus graph
+orch proof <task>                  # Verification proof
+orch wiki status|preview|publish   # Wiki (publish = default branch)
+orch integration status            # Linear / GitHub sync
+orch plan draft "<goal>"           # Draft + route a CE plan (no dispatch)
+orch plan validate|import|reuse|verify  # Route / reuse-check a CE plan
+orch council convene <plan.json>   # Independent Claude+Codex+Grok review
+orch review ingest --task <id>     # Store Cursor/human review on HEAD SHA
+orch pr body|create <task>         # Linear magic-word PR
+orch proof publish <task>          # Linear + GitHub proof bound to SHA
 ```
 
 </details>

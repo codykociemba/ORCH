@@ -73,6 +73,26 @@ export function registerTuiCommand(program: Command, container: Container): void
         return container.taskService.list();
       };
 
+      const onGetAdmission = async (taskId: string) => {
+        const contract = await container.codeAdmissionService.getContract(taskId);
+        if (!contract) return undefined;
+        const requests = await container.codeAdmissionService.listRequests(taskId);
+        return {
+          indexLabel: `${contract.code_index.repo} ${contract.code_index.index_current ? 'current' : 'stale'}`,
+          existingEdits: contract.allowed_existing_edits.length,
+          newFiles: contract.allowed_new_files.length,
+          newSymbols: contract.allowed_new_symbols.length,
+          dependencies: contract.allowed_dependencies.length,
+          requests: requests.map((request) => ({
+            id: request.id,
+            type: request.type,
+            status: request.status,
+          })),
+          lastAudit: undefined,
+          violations: 0,
+        };
+      };
+
       const onRefreshAgents = async () => {
         return container.agentService.list();
       };
@@ -283,6 +303,7 @@ export function registerTuiCommand(program: Command, container: Container): void
           onEnableAgent,
           onSubscribeEvents,
           onRefreshTasks,
+          onGetAdmission,
           onRefreshAgents,
           onRefreshState,
           onLoadHistory,

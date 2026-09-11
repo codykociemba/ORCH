@@ -36,6 +36,14 @@ import { RunService } from './application/run-service.js';
 import { MessageService } from './application/message-service.js';
 import { GoalService } from './application/goal-service.js';
 import { TeamService } from './application/team-service.js';
+import { CodeAdmissionService } from './application/code-admission-service.js';
+import { IntegrationService } from './application/integration-service.js';
+import { LearningService } from './application/learning-service.js';
+import { AdmissionStore } from './infrastructure/storage/admission-store.js';
+import { OutboxStore } from './infrastructure/integrations/outbox-store.js';
+import { WorkflowConfigStore } from './infrastructure/storage/workflow-config-store.js';
+import { createLinearTracker } from './infrastructure/integrations/linear/linear-issue-tracker.js';
+import type { WorkflowConfig } from './domain/workflow-config.js';
 
 import type { Orchestrator } from './application/orchestrator.js';
 import type { DoctorService } from './application/doctor-service.js';
@@ -68,6 +76,11 @@ export interface LightContainer {
   messageService: MessageService;
   goalService: GoalService;
   teamService: TeamService;
+  workflowConfig: WorkflowConfig | null;
+  admissionStore: AdmissionStore;
+  codeAdmissionService: CodeAdmissionService;
+  outboxStore: OutboxStore;
+  integrationService: IntegrationService;
 }
 
 /** Full container — everything from light + orchestrator, adapters, workspace, template. */
@@ -115,6 +128,28 @@ export async function buildLightContainer(context: CliContext): Promise<LightCon
   const messageService = new MessageService(messageStore, agentStore, teamStore, eventBus);
   const goalService = new GoalService(goalStore, eventBus, agentService, taskService, contextStore);
   const teamService = new TeamService(teamStore, agentStore, taskStore, eventBus);
+  const workflowConfig = await new WorkflowConfigStore(context.projectRoot).read();
+  const admissionStore = new AdmissionStore(paths);
+  const codeAdmissionService = new CodeAdmissionService(
+    admissionStore,
+    taskStore,
+    eventBus,
+    workflowConfig,
+    context.projectRoot,
+  );
+  const outboxStore = new OutboxStore(paths);
+  const integrationService = new IntegrationService(
+    taskStore,
+    outboxStore,
+    eventBus,
+    workflowConfig,
+    createLinearTracker(workflowConfig),
+  );
+  eventBus.on('task:created', (event) => {
+    void codeAdmissionService.ensureFastPathContract(event.task);
+  });
+  integrationService.subscribe();
+  new LearningService(paths, eventBus).subscribe();
 
   return {
     context,
@@ -138,6 +173,11 @@ export async function buildLightContainer(context: CliContext): Promise<LightCon
     messageService,
     goalService,
     teamService,
+    workflowConfig,
+    admissionStore,
+    codeAdmissionService,
+    outboxStore,
+    integrationService,
   };
 }
 
@@ -208,6 +248,31 @@ export async function buildFullContainer(context: CliContext): Promise<Container
   adapterRegistry.register(new AntigravityAdapter(processManager));
 
   const doctorService = new DoctorService(adapterRegistry, processManager, context.projectRoot);
+  const { GitNexusCodeIntelligence } = await import('./infrastructure/code-intelligence/gitnexus-adapter.js');
+  const { McpStdioClient, defaultGitNexusMcpArgs } = await import('./infrastructure/code-intelligence/mcp-stdio-client.js');
+  const mcpSpec = defaultGitNexusMcpArgs();
+  const mcp = new McpStdioClient(mcpSpec.command, mcpSpec.args, context.projectRoot);
+  const codeIntelligence = new GitNexusCodeIntelligence({
+    projectRoot: context.projectRoot,
+    mcp,
+  });
+  const { AdapterAdmissionReviewer } = await import('./application/admission-reviewer.js');
+  const admissionReviewer = new AdapterAdmissionReviewer(
+    (kind) => (kind === 'codex' ? adapterRegistry.get('codex') : adapterRegistry.get('claude')),
+    context.projectRoot,
+  );
+  const codeAdmissionService = new CodeAdmissionService(
+    light.admissionStore,
+    light.taskStore,
+    light.eventBus,
+    light.workflowConfig,
+    context.projectRoot,
+    codeIntelligence,
+    workspaceManager,
+    admissionReviewer,
+  );
+  light.codeAdmissionService = codeAdmissionService;
+
   const orchestrator = new Orchestrator({
     taskStore: light.taskStore,
     agentStore: light.agentStore,
@@ -225,6 +290,8 @@ export async function buildFullContainer(context: CliContext): Promise<Container
     messageService: light.messageService,
     goalStore: light.goalStore,
     skillLoader,
+    codeAdmissionService,
+    integrationService: light.integrationService,
     config: light.config,
     projectRoot: context.projectRoot,
     lockPath: light.paths.lockPath,

@@ -12,6 +12,12 @@ export interface PrepareResult {
   branch?: string;
 }
 
+export interface ChangedFileDiff {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  addedLines: string[];
+}
+
 export interface IWorkspaceManager {
   prepare(task: Task, agent: Agent, config: OrchestratorConfig): Promise<PrepareResult>;
   mergeBack(branch: string): Promise<MergeResult>;
@@ -19,4 +25,6 @@ export interface IWorkspaceManager {
   validate(workspacePath: string, projectRoot: string): void;
   /** Get files changed on a worktree branch relative to its merge-base. */
   getChangedFiles(branch: string): Promise<string[]>;
+  /** Name-status + added lines for the conventions/admission audit. */
+  getChangedFileDiffs(branch: string): Promise<ChangedFileDiff[]>;
 }

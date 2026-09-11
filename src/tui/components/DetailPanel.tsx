@@ -44,6 +44,17 @@ export interface TaskLog {
   msgType?: string;
 }
 
+export interface AdmissionSummary {
+  indexLabel: string;
+  existingEdits: number;
+  newFiles: number;
+  newSymbols: number;
+  dependencies: number;
+  requests: Array<{ id: string; type: string; status: string }>;
+  lastAudit?: 'pass' | 'fail';
+  violations: number;
+}
+
 export interface DetailPanelProps {
   task: Task;
   height: number;
@@ -53,6 +64,7 @@ export interface DetailPanelProps {
   agentNameMap?: Map<string, string>;
   /** Map task ID → task title for depends display */
   taskTitleMap?: Map<string, string>;
+  admission?: AdmissionSummary;
 }
 
 /** Render a centered section divider: ─── label ───────────── */
@@ -68,7 +80,7 @@ export function SectionDivider({ label, width, color }: { label: string; width: 
   );
 }
 
-export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskTitleMap }: DetailPanelProps) {
+export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskTitleMap, admission }: DetailPanelProps) {
   const statusColor = getTaskStatusColor(task.status);
   const priColor = task.priority <= 2 ? (task.priority === 1 ? tuiColors.red : tuiColors.yellow) : undefined;
   const col1Width = 24;
@@ -178,6 +190,57 @@ export function DetailPanel({ task, height, width, taskLogs, agentNameMap, taskT
           </Text>
         </Box>
       </Box>
+      {(task.external?.linear?.identifier || task.council_ref || task.plan_id || task.proof?.head_sha) && (
+        <Box>
+          <Box width={col1Width}>
+            <Text color={tuiColors.dim}>  linear    </Text>
+            <Text>{task.external?.linear?.identifier ?? '\u2014'}</Text>
+          </Box>
+          <Box>
+            <Text color={tuiColors.dim}>  plan      </Text>
+            <Text dimColor>{task.plan_unit_id ?? task.plan_id ?? task.council_ref ?? '\u2014'}</Text>
+          </Box>
+        </Box>
+      )}
+      {task.proof?.head_sha && (
+        <Box>
+          <Text color={tuiColors.dim}>  proof     </Text>
+          <Text dimColor>{task.proof.verified ? 'verified' : 'pending'} @ {task.proof.head_sha.slice(0, 7)}</Text>
+        </Box>
+      )}
+
+      {admission && (
+        <>
+          <Text>{' '}</Text>
+          <SectionDivider label="code admission" width={width} color={tuiColors.dim} />
+          <Text>
+            <Text color={tuiColors.dim}>  GitNexus  </Text>
+            <Text>{admission.indexLabel}</Text>
+          </Text>
+          <Text>
+            <Text color={tuiColors.dim}>  Contract  </Text>
+            <Text dimColor>
+              edits {admission.existingEdits}  files {admission.newFiles}  symbols {admission.newSymbols}  deps {admission.dependencies}
+            </Text>
+          </Text>
+          {admission.lastAudit && (
+            <Text>
+              <Text color={tuiColors.dim}>  Audit     </Text>
+              <Text color={admission.lastAudit === 'pass' ? tuiColors.green : tuiColors.red}>
+                {admission.lastAudit.toUpperCase()}
+              </Text>
+              {admission.violations > 0 && (
+                <Text color={tuiColors.dim}>  {admission.violations} violation{admission.violations === 1 ? '' : 's'}</Text>
+              )}
+            </Text>
+          )}
+          {admission.requests.slice(0, 4).map((request) => (
+            <Text key={request.id} dimColor>
+              {'  '}{request.id}  {request.type}  {request.status}
+            </Text>
+          ))}
+        </>
+      )}
 
       {/* Attachments */}
       {hasAttachments && (

@@ -38,6 +38,7 @@ import type { TaskService } from './task-service.js';
 import type { AgentService } from './agent-service.js';
 import type { RunService } from './run-service.js';
 import { ReviewRunner } from './review-runner.js';
+import { passesDispatchGates } from './dispatch-policy.js';
 
 /** Max serialized event data written to JSONL (8 KB) */
 const MAX_EVENT_DATA_LEN = 8192;
@@ -61,6 +62,8 @@ export interface OrchestratorDeps {
   messageService?: import('./message-service.js').MessageService;
   goalStore?: IGoalStore;
   skillLoader?: ISkillLoader;
+  codeAdmissionService?: import('./code-admission-service.js').CodeAdmissionService;
+  integrationService?: import('./integration-service.js').IntegrationService;
   config: OrchestratorConfig;
   projectRoot: string;
   lockPath: string;
@@ -469,6 +472,9 @@ export class Orchestrator {
         this.cachedGoalStore?.invalidate();
 
         await this.loadState();
+        if (this.deps.codeAdmissionService?.enabled()) {
+          await this.deps.codeAdmissionService.processPending();
+        }
         await this.reconcile();
         if (!this.skipAutonomousSeeding) {
           await this.seedAutonomousTasks();
@@ -759,7 +765,12 @@ export class Orchestrator {
           isDispatchable(t.status) &&
           !isBlocked(t, taskMap) &&
           !state.running[t.id] &&
-          !state.claimed.has(t.id),
+          !state.claimed.has(t.id) &&
+          passesDispatchGates(t, {
+            linearRequired: this.deps.integrationService?.requiredBeforeDispatch() === true,
+            requirePlan:
+              this.deps.codeAdmissionService?.workflowConfig()?.orchestration?.require_plan_before_dispatch === true,
+          }),
       )
       .sort((a, b) => {
         // 1. Priority: lower number = higher urgency (P1 before P4)
@@ -1073,6 +1084,35 @@ export class Orchestrator {
         // Split mode: system prompt (cacheable) + user prompt (dynamic)
         systemPrompt = await this.deps.templateEngine.render(systemTemplate, context);
         prompt = await this.deps.templateEngine.render(userTemplate, context);
+      }
+
+      if (this.deps.codeAdmissionService?.enabled()) {
+        const preflight = await this.deps.codeAdmissionService.preflight(task);
+        if (!preflight.ok) {
+          this.unclaim(taskId);
+          task.feedback = `PREFLIGHT FAILED:\n${preflight.reasons.join('\n')}`;
+          await this.deps.taskStore.save(task);
+          await this.saveState();
+          return;
+        }
+        const contract = await this.deps.codeAdmissionService.ensureFastPathContract(task);
+        if (contract) {
+          const block = this.deps.codeAdmissionService.renderPromptBlock(contract);
+          if (systemPrompt !== undefined) {
+            systemPrompt = systemPrompt + '\n\n' + block;
+          } else {
+            prompt = prompt + '\n\n' + block;
+          }
+        }
+        const { resolvePonytailMode, renderPonytailPrompt } = await import('./ponytail-policy.js');
+        const ponytail = renderPonytailPrompt(resolvePonytailMode('implementation', task, this.deps.codeAdmissionService.workflowConfig()));
+        if (ponytail) {
+          if (systemPrompt !== undefined) {
+            systemPrompt = systemPrompt + '\n\n' + ponytail;
+          } else {
+            prompt = prompt + '\n\n' + ponytail;
+          }
+        }
       }
 
       // Augment prompt with library skill content
@@ -1460,6 +1500,42 @@ export class Orchestrator {
         state.stats.total_tokens.input + state.stats.total_tokens.output + state.stats.total_tokens.reasoning;
     }
 
+    if (this.deps.codeAdmissionService?.enabled()) {
+      this.deps.eventBus.emit({ type: 'code_admission:audit_started', taskId });
+      const audit = await this.deps.codeAdmissionService.auditTask(task);
+      if (audit.passed) {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        try {
+          const { stdout } = await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: this.deps.projectRoot });
+          task.proof = { ...task.proof, files_changed: task.proof?.files_changed ?? [], head_sha: stdout.trim() };
+          await this.deps.taskStore.save(task);
+        } catch {
+          // SHA binding is best-effort here; ProofService still requires it for Verified
+        }
+      }
+      if (!audit.passed) {
+        const summary = audit.violations.map((item) => item.message).join('\n');
+        task.feedback = summary;
+        await this.forceTaskToReview(task, agentId, `CODE ADMISSION FAILED:\n${summary}`);
+        return;
+      }
+    }
+
+    const reviewCfg = this.deps.codeAdmissionService?.workflowConfig()?.review;
+    if (reviewCfg?.require_review_before_merge === true) {
+      const { reviewAllowsMerge } = await import('./review-policy.js');
+      const policy = reviewCfg.policy ?? 'human_or_cursor';
+      if (!reviewAllowsMerge(task.reviews ?? [], policy, task.proof?.head_sha)) {
+        await this.forceTaskToReview(
+          task,
+          agentId,
+          `REVIEW REQUIRED: policy ${policy} needs an approve bound to HEAD before merge.`,
+        );
+        return;
+      }
+    }
+
     // Auto merge-back: if task used a worktree branch, merge into current branch
     if (task.proof?.branch) {
       try {
@@ -1471,6 +1547,11 @@ export class Orchestrator {
             branch: task.proof.branch,
           });
           // Clean up worktree and branch after successful merge
+          await this.deps.codeAdmissionService?.releaseTask(taskId);
+          await this.deps.integrationService?.onMerged(task, {
+            sha: task.proof.head_sha ?? '',
+            merged_at: new Date().toISOString(),
+          });
           await this.deps.workspaceManager.cleanup(taskId, task.proof.branch).catch((err) => {
             this.deps.eventBus.emit({
               type: 'orchestrator:error',

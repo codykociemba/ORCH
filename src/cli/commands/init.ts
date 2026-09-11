@@ -14,6 +14,7 @@ import { Paths } from '../../infrastructure/storage/paths.js';
 import { ensureDir, pathExists } from '../../infrastructure/storage/fs-utils.js';
 import { writeYaml, atomicWrite } from '../../infrastructure/storage/fs-utils.js';
 import { DEFAULT_CONFIG } from '../../domain/config.js';
+import { DEFAULT_WORKFLOW_CONFIG } from '../../domain/workflow-config.js';
 import { DEFAULT_PROMPT_TEMPLATE } from '../../infrastructure/template/template-engine.js';
 import { getDefaultAgents } from '../../domain/default-agents.js';
 import { SUPPORTED_ADAPTERS, isAdapterKind } from '../../domain/model-tiers.js';
@@ -68,6 +69,13 @@ export async function runInit(opts: { name?: string; adapter?: string } = {}): P
     '',
     '# Agent workspaces',
     'workspaces/',
+    '',
+    '# Code admission ledger (repo-global, not committed)',
+    'admission/',
+    'outbox/',
+    'learnings/',
+    'council/',
+    'reviews/',
   ].join('\n') + '\n';
 
   const excludeContent = [
@@ -87,6 +95,7 @@ export async function runInit(opts: { name?: string; adapter?: string } = {}): P
 
   await Promise.all([
     writeYaml(paths.configPath, config),
+    writeYaml(path.join(projectRoot, '.orch', 'workflow.yml'), DEFAULT_WORKFLOW_CONFIG),
     atomicWrite(paths.gitignorePath, gitignoreContent),
     atomicWrite(paths.workspaceExcludePath, excludeContent),
     atomicWrite(paths.defaultTemplatePath(), DEFAULT_PROMPT_TEMPLATE),

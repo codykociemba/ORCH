@@ -13,7 +13,7 @@ import type { Task, WorkspaceMode } from '../../domain/task.js';
 import type { IProcessManager } from '../process/process-manager.js';
 import { validateWorkspacePath, sanitizeId } from '../storage/paths.js';
 import { ensureDir } from '../storage/fs-utils.js';
-import type { IWorkspaceManager, PrepareResult } from './interface.js';
+import type { ChangedFileDiff, IWorkspaceManager, PrepareResult } from './interface.js';
 import { MergeStrategy, type MergeResult } from './merge-strategy.js';
 import { WorkspaceError } from '../../domain/errors.js';
 
@@ -114,6 +114,48 @@ export class WorkspaceManager implements IWorkspaceManager {
     }
   }
 
+  async getChangedFileDiffs(branch: string): Promise<ChangedFileDiff[]> {
+    try {
+      const { stdout: baseStdout } = await this.spawnAndCapture(
+        'git', ['merge-base', 'HEAD', branch],
+      );
+      const mergeBase = baseStdout.trim();
+      if (!mergeBase) return [];
+
+      const { stdout: statusStdout, code } = await this.spawnAndCapture(
+        'git', ['diff', '--name-status', `${mergeBase}...${branch}`],
+      );
+      if (code !== 0 || !statusStdout.trim()) return [];
+
+      const rows = statusStdout.trim().split('\n').filter(Boolean);
+      const diffs: ChangedFileDiff[] = [];
+      for (const line of rows) {
+        const parts = line.split(/\s+/);
+        const codeFlag = parts[0] ?? '';
+        const path = parts[parts.length - 1] ?? '';
+        const status: ChangedFileDiff['status'] =
+          codeFlag.startsWith('A') ? 'added' :
+          codeFlag.startsWith('D') ? 'deleted' :
+          codeFlag.startsWith('R') ? 'renamed' :
+          'modified';
+        let addedLines: string[] = [];
+        if (status !== 'deleted' && path) {
+          const { stdout: patch } = await this.spawnAndCapture(
+            'git', ['diff', '-U0', `${mergeBase}...${branch}`, '--', path],
+          );
+          addedLines = patch
+            .split('\n')
+            .filter((row) => row.startsWith('+') && !row.startsWith('+++'))
+            .map((row) => row.slice(1));
+        }
+        diffs.push({ path, status, addedLines });
+      }
+      return diffs;
+    } catch {
+      return [];
+    }
+  }
+
   private resolveMode(task: Task, agent: Agent, config: OrchestratorConfig): WorkspaceMode {
     return (
       task.workspace_mode ??
@@ -131,8 +173,7 @@ export class WorkspaceManager implements IWorkspaceManager {
     );
     await ensureDir(path.dirname(workspacePath));
 
-    const titleSlug = sanitizeTitle(task.title) || sanitizeId(task.id);
-    const branchName = `orchestry/${sanitizeId(task.id)}/${titleSlug}`;
+    const branchName = worktreeBranchName(task);
 
     // Idempotent: if worktree directory already exists (retry after failure), reuse it
     try {
@@ -227,6 +268,14 @@ export class WorkspaceManager implements IWorkspaceManager {
 
     return workspacePath;
   }
+}
+
+export function worktreeBranchName(task: Task): string {
+  const titleSlug = sanitizeTitle(task.title) || sanitizeId(task.id);
+  const linear = task.external?.linear?.identifier?.replace(/[^A-Za-z0-9._-]/g, '');
+  return linear
+    ? `orchestry/${linear}/${sanitizeId(task.id)}/${titleSlug}`
+    : `orchestry/${sanitizeId(task.id)}/${titleSlug}`;
 }
 
 function sanitizeTitle(title: string): string {

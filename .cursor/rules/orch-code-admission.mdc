@@ -1,0 +1,11 @@
+---
+description: GitNexus-backed modification admission — watcher decides
+alwaysApply: true
+---
+
+- Before writing a new reusable abstraction, search GitNexus and inspect symbol context/processes.
+- Prefer reuse or modification when an existing symbol fits.
+- If the Modification Contract does not permit the new file, symbol, or dependency, run `orch admission request`. Do not create it until the watcher approves.
+- Workers never approve their own admission requests. Strong exact hits skip the LLM.
+- ORCH audits the final git + GitNexus diff independently; hiding a create does not work.
+- Do not add a second code graph or homemade symbol catalog.
